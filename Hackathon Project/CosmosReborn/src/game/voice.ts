@@ -81,8 +81,16 @@ export function speak(text: string, voice: VoiceName, volume = 1): void {
     const audio = new Audio(url)
     audio.volume = volume
     current = audio
+    audio.addEventListener('ended', () => {
+      if (current === audio) current = null
+    })
     audio.play().catch(() => {})
   })
+}
+
+/** True while a recorded MOONLINK line is playing, so the mic can stay quiet. */
+export function voicePlaying(): boolean {
+  return !!current && !current.paused && !current.ended
 }
 
 export function stopVoice(): void {

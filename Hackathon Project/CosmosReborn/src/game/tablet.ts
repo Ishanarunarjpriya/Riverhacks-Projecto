@@ -5,6 +5,7 @@ import { SCREEN_H, SCREEN_W, WORLD_SIZE } from './constants'
 import { clamp, easeOutBack, wrap, wrapPositive } from './math'
 import { ellipse, makeSprite, rect, type Ctx } from './pixel'
 import type { TextLayer } from './text'
+import type { EarthRotation } from './erp'
 import type { QuestTracker } from './tracker'
 import type { World } from './world'
 
@@ -52,6 +53,7 @@ export interface TabletView {
   underground: boolean
   lifeSigns: LifeSign[]
   waypoint?: { x: number; z: number; label: string } | null
+  erp?: EarthRotation | null
 }
 
 export interface LifeSign {
@@ -99,6 +101,15 @@ export class Tablet {
 
   back(): void {
     this.screen = 'home'
+  }
+
+  /** Jump straight to the A.I. app, used when a spoken question arrives. */
+  openAssistant(): void {
+    this.open = true
+    this.screen = 'ai'
+    this.t = 1
+    this.boot = Math.max(this.boot, 1.95)
+    this.lockedMsg = null
   }
 
   /**
@@ -254,6 +265,15 @@ export class Tablet {
       this.forEachTile(SX, SY, (i, color, gx, gy) => {
         text.text(TILES[i].label, gx + TILE_W / 2, gy + TILE_H - 10, color, { align: 'center', size: 6.5 })
       })
+      if (view.erp) {
+        const sign = (v: number, digits: number) => `${v < 0 ? '-' : '+'}${Math.abs(v).toFixed(digits)}`
+        text.text('EARTH LOCK', SX + 8, SY + 78, '#5dcaa5', { size: 4.6 })
+        text.text(`X ${sign(view.erp.x, 3)}"  Y ${sign(view.erp.y, 3)}"`, SX + 8, SY + 86, '#9aa2cf', { size: 4.6 })
+        text.text(`UT1-UTC ${sign(view.erp.ut1, 4)}s  LOD ${sign(view.erp.lod, 2)}ms`, SX + 8, SY + 94, '#9aa2cf', { size: 4.4 })
+        text.text(`${view.erp.live ? 'LIVE' : 'CACHED'} IGS ERP / NASA CDDIS`, SX + 8, SY + 102, '#3f4878', { size: 3.8 })
+      } else {
+        text.text('EARTH LOCK: ACQUIRING...', SX + 8, SY + 86, '#3f4878', { size: 4.4 })
+      }
       if (this.lockedMsg) text.text(`LOCKED: ${this.lockedMsg.text}`, SX + SW / 2, SY + SH - 10, '#ff8a7a', { align: 'center', size: 4.8 })
       else if (this.ready) text.text('← → CHOOSE · ENTER OPEN · TAB CLOSE', SX + SW / 2, SY + SH - 10, '#5a63a0', { align: 'center', size: 4.8 })
       return
@@ -509,7 +529,26 @@ export class Tablet {
       text.text('ACT I COMPLETE', SX + 8, y, '#fac775', { size: 6.5 })
       y += 9
     }
-    y += 4
+    // Side quests are optional, but the blaster one gates the guardians, so the
+    // tablet has to show their requirements.
+    const side = tracker.openOptionalQuests.slice(0, 2)
+    if (side.length) {
+      y += 3
+      text.text('SIDE QUESTS', SX + 8, y, '#9fe1cb', { size: 5 })
+      y += 7
+      for (const q of side) {
+        const goal = tracker.progress(q).find((p) => !p.done)
+        text.text(`◇ ${q.title.toUpperCase()}`, SX + 10, y, '#8e96c4', { size: 4.8 })
+        y += 6
+        if (goal) {
+          const count = goal.target > 1 ? `${goal.current}/${goal.target}` : ''
+          text.text(`· ${goal.label}`, SX + 14, y, '#5b6496', { size: 4.5 })
+          text.text(count, SX + SW - 10, y, '#5b6496', { size: 4.5, align: 'right' })
+          y += 6
+        }
+      }
+    }
+    y += 2
     text.text(`COMPLETED: ${tracker.completed.length}`, SX + 8, y, '#5a63a0', { size: 5 })
   }
 

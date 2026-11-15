@@ -3,6 +3,8 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { answerAssist } from './server/assist.js'
+import { getEarthRotation } from './server/earth.js'
+import { transcribe } from './server/stt.js'
 import { speak } from './server/tts.js'
 import { attachRooms } from './server/rooms.js'
 
@@ -30,6 +32,7 @@ loadDotEnv()
 const PORT = Number(process.env.PORT) || 3000
 const DIST = resolve('dist')
 const API_KEY = process.env.SERPAPI_KEY
+const MAX_AUDIO = 2.5 * 1024 * 1024
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -50,6 +53,24 @@ const TYPES = {
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(JSON.stringify(body))
+}
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    let tooLarge = false
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        tooLarge = true
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => (tooLarge ? reject(new Error('AUDIO TOO LARGE')) : resolve(Buffer.concat(chunks))))
+    req.on('error', reject)
+  })
 }
 
 async function serveFile(res, path, status = 200) {
@@ -80,6 +101,30 @@ const server = createServer(async (req, res) => {
       key: API_KEY,
     })
     return json(res, status, body)
+  }
+
+  if (url.pathname === '/api/earth') {
+    if (req.method !== 'GET') return json(res, 405, { error: 'USE GET' })
+    const body = await getEarthRotation()
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=1800' })
+    return res.end(JSON.stringify(body))
+  }
+
+  if (url.pathname === '/api/stt') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'USE POST' })
+    let audio
+    try {
+      audio = await readBody(req, MAX_AUDIO)
+    } catch {
+      return json(res, 413, { error: 'AUDIO TOO LARGE' })
+    }
+    const result = await transcribe({
+      audio,
+      type: req.headers['content-type'],
+      key: process.env.ELEVENLABS_API_KEY,
+      ip: String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0],
+    })
+    return json(res, result.status, result.json)
   }
 
   if (url.pathname === '/api/tts') {
@@ -119,5 +164,6 @@ attachRooms(server)
 
 server.listen(PORT, () => {
   const mode = API_KEY ? 'MOONLINK online' : 'MOONLINK offline (SERPAPI_KEY not set)'
-  console.log(`Cosmos Reborn on http://localhost:${PORT} — ${mode}`)
+  const voice = process.env.ELEVENLABS_API_KEY ? 'voice online' : 'voice offline (ELEVENLABS_API_KEY not set)'
+  console.log(`Cosmos Reborn on http://localhost:${PORT} — ${mode} — ${voice}`)
 })

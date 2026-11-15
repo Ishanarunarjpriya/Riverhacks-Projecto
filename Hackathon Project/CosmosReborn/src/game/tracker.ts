@@ -199,6 +199,7 @@ export class QuestTracker {
     this.messages = []
     this.popupFree = 0
     this.pendingSounds = []
+    this.grantSideRewards()
     const quest = this.activeQuest
     this.say('act', 'WELCOME BACK', quest ? `ACT ${roman(quest.act)} · ${quest.title.toUpperCase()}` : 'THE MOON REMEMBERS YOU', '#fac775', 0.3)
   }
@@ -1076,6 +1077,20 @@ export class QuestTracker {
         this.say('complete', 'SIDE QUEST COMPLETE', quest.title.toUpperCase(), '#9fe1cb')
         this.sounds.push('complete')
       }
+    }
+    this.grantSideRewards()
+  }
+
+  /**
+   * The blaster used to arrive only in Act III, long after the guardians that need
+   * it. The side quest arms the player first; checking the completion (not just the
+   * quest loop) also hands it to old saves and co-op guests who join after it.
+   */
+  private grantSideRewards(): void {
+    if (this.completed.includes('act2.armed') && this.count('blaster') === 0) {
+      this.add('blaster', 1)
+      this.toast('BLASTER ACQUIRED — HOLD IT AND FIRE WITH Q', '#ff8a7a')
+      this.sounds.push('pickup')
     }
   }
 

@@ -43,6 +43,89 @@ body {
   pointer-events: none;
 }
 
+/* Persistent mic toggle for the "Hey AI" voice assistant. */
+.voice-wrap {
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  transform: translateX(-50%);
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.voice-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.3em 0.6em;
+  background: rgba(6, 5, 24, 0.82);
+  border: 1px solid #2f3560;
+  color: #5a63a0;
+  font: 600 clamp(8px, 1.35vmin, 14px) / 1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.voice-note {
+  max-width: 70vw;
+  padding: 2px 5px;
+  background: rgba(6, 5, 24, 0.92);
+  border: 1px solid #ff8a7a;
+  color: #ff8a7a;
+  font: 600 clamp(7px, 1.1vmin, 11px) / 1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.voice-note.hint {
+  border-color: #2f3560;
+  color: #5a63a0;
+}
+
+.voice-control:hover {
+  border-color: #5dcaa5;
+  color: #9fe1cb;
+}
+
+.voice-control.on {
+  border-color: #5dcaa5;
+  color: #5dcaa5;
+}
+
+.voice-control.error {
+  border-color: #ff8a7a;
+  color: #ff8a7a;
+}
+
+.voice-dot {
+  width: 0.5em;
+  height: 0.5em;
+  background: currentColor;
+}
+
+.voice-control.on .voice-dot {
+  box-shadow: 0 0 5px #5dcaa5;
+  animation: voice-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-control.on .voice-dot {
+    animation: none;
+  }
+}
+
 /* MOONLINK: the tablet's A.I. app, positioned over the tablet screen rect. */
 .ai-app {
   position: absolute;

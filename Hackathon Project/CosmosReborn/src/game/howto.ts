@@ -33,7 +33,7 @@ export function howTo(o: Objective): string {
     case 'supplies':
       return 'Press E at the storage crate at base to collect.'
     case 'boss':
-      return 'Press E on a purple crystal. Hit the guardian with a pickaxe when it is low.'
+      return 'Finish SOMETHING TO SHOOT WITH for a blaster, then press E on a purple crystal and shoot the guardian when it is low.'
     case 'signal':
       return 'Follow the purple ◆ marker.'
     case 'cave':

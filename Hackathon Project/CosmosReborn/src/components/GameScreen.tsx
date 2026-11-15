@@ -4,6 +4,7 @@ import { Game } from '../game/game'
 import type { ScreenRect } from '../game/tablet'
 import Assistant from './Assistant'
 import DevMenu from './DevMenu'
+import VoiceControl from './VoiceControl'
 import Lobby from './Lobby'
 
 function fitFrame(frame: HTMLDivElement): void {
@@ -78,6 +79,7 @@ export default function GameScreen() {
       <div ref={frameRef} className="game-frame">
         <canvas ref={canvasRef} className="game-canvas" aria-label="Cosmos Reborn game" />
         <canvas ref={textRef} className="game-text" aria-hidden="true" />
+        {game && <VoiceControl game={game} />}
         {game && aiScreen && <Assistant rect={aiScreen} onBack={() => game.tabletHome()} />}
         {game && lobby && <Lobby game={game} />}
       </div>

@@ -120,7 +120,13 @@ The assistant cannot live in a static build — `/api/assist` needs a server hol
 
 To run the production build locally: `npm run build && npm start` (defaults to port 3000, honours `PORT`).
 
+Voice input ("Hey AI"):
+Click the `VOICE` control at the top of the game, allow the microphone, then say "Hey AI, how do we make air?". The browser records one utterance, posts it to `/api/stt`, and `server/stt.js` transcribes it with ElevenLabs Scribe using `ELEVENLABS_API_KEY`. The text after the wake phrase is sent to the existing MOONLINK assistant, the tablet opens on the A.I. screen, and the answer is spoken with the existing ElevenLabs voice. The mic pauses while a voice line is playing. The wake word can also be said alone; the next utterance becomes the question. If the browser blocks the microphone, the control shows `MIC BLOCKED`; allow mic access for the page (use Chrome/Edge if the packaged preview refuses it).
+
 Both hosts share `server/assist.js`, which owns the persona, the block/reference mapping, the 10-minute cache and the errors. The endpoint returns 503 when the key is missing, so the A.I. app prints "SERPAPI_KEY IS MISSING FROM .env" instead of failing silently, and the header switches from "SIGNAL: WEAK" to "SIGNAL: LOST" after a failed query. Each new question costs one SerpApi search; repeats are cached per question and thread.
+
+Live Earth rotation data (radio dish):
+The dish's Earth-lock telemetry comes from the NASA CDDIS GNSS Earth Rotation Parameters (ERP) dataset: https://data.nasa.gov/dataset/global-navigation-satellite-system-gnss-earth-rotation-parameters-erp-products-from-nasa-c. The product is the IGS combined ERP (X/Y pole, UT1-UTC, LOD), DOI 10.5067/GNSS/GNSS_IGSERP_001. CDDIS requires an Earthdata login, so `server/earth.js` reads the same IGS product from the public BKG mirror (`https://igs.bkg.bund.de/root_ftp/IGS/products/{gps-week}/`), preferring observed rapid files over predicted ultra-rapid ones. Values are cached for three hours; if the mirror is unreachable, a bundled real record is served so the tablet and dish still work offline. The tablet home screen shows the current fix and the radio dish uses it for its Earth lock. Units are arcseconds for X/Y, seconds for UT1-UTC and milliseconds for LOD.
 
 
 

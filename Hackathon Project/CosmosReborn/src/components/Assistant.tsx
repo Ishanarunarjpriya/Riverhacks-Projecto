@@ -3,6 +3,7 @@ import { askAssistant, type AssistAnswer, type AssistBlock } from '../game/assis
 import { SCREEN_H, SCREEN_W } from '../game/constants'
 import type { ScreenRect } from '../game/tablet'
 import { speak } from '../game/voice'
+import { subscribeVoiceQueries, takePendingVoiceQuery } from '../game/voiceAsk'
 
 interface Props {
   rect: ScreenRect
@@ -122,10 +123,15 @@ export default function Assistant({ rect, onBack }: Props) {
 
   const busy = entries.some((entry) => entry.status === 'loading')
   const offline = entries[entries.length - 1]?.status === 'error'
+  const busyRef = useRef(false)
+  useEffect(() => {
+    busyRef.current = busy
+  }, [busy])
 
   const ask = (text: string) => {
     const q = text.trim()
-    if (!q || busy) return
+    if (!q || busyRef.current) return
+    busyRef.current = true
     const id = nextId++
     setEntries((prev) => [...prev, { id, query: q, status: 'loading' }])
     setQuery('')
@@ -145,6 +151,19 @@ export default function Assistant({ rect, onBack }: Props) {
         ),
       )
   }
+
+  const askRef = useRef(ask)
+  useEffect(() => {
+    askRef.current = ask
+  })
+
+  // A spoken question may arrive after this panel mounts; consume the queue
+  // and stay subscribed while it is open.
+  useEffect(() => {
+    const pending = takePendingVoiceQuery()
+    if (pending) askRef.current(pending)
+    return subscribeVoiceQueries((next) => askRef.current(next))
+  }, [])
 
   return (
     <div
@@ -178,6 +197,8 @@ export default function Assistant({ rect, onBack }: Props) {
                 &gt; THE OLD NETWORKS STILL ANSWER. SOMETHING OUT THERE ANSWERS WITH THEM.
                 <br />
                 &gt; ASK. I WILL TELL YOU WHAT I AM ALLOWED TO.
+                <br />
+                &gt; VOICE: TURN THE MIC ON ABOVE, THEN SAY "HEY AI ...".
               </p>
               <div className="ai-suggestions">
                 {SUGGESTIONS.map((s) => (

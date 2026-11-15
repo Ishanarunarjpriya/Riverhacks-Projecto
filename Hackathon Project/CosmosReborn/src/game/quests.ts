@@ -185,7 +185,7 @@ export const QUESTS: readonly Quest[] = [
     act: 2,
     title: 'Anomaly Hunt',
     summary: 'Enter 2 anomalies, defeat what guards them, and trace the strange signal.',
-    hint: 'Anomalies are floating purple crystals. Press E to touch one and you are pulled into a cave below it. Hold a pickaxe; click or press E to strike the guardian only while it is weak (low to the ground or kneeling). After two, a purple marker leads to the signal.',
+    hint: 'Anomalies are floating purple crystals. A guardian waits below each one and only respects firepower: finish the side quest SOMETHING TO SHOOT WITH, then press E on a crystal. Hold the blaster and shoot the guardian while it is weak (low to the ground or kneeling). After two, a purple marker leads to the signal.',
     transmission: 'MOONLINK: CONTAINMENT PROTOCOL SAYS KEEP YOU AWAY FROM THE CRYSTALS. I AM IGNORING CONTAINMENT PROTOCOL.',
     objectives: [
       { kind: 'boss', label: 'Guardians defeated', count: 2 },
@@ -438,6 +438,20 @@ export const QUESTS: readonly Quest[] = [
     summary: 'Find the last pieces of why you can breathe without a suit, and why they hunt you.',
     hint: 'The lab log in the hidden cavern, the radio dish in the Signal Highlands, and something still running inside the Kestrel.',
     objectives: [{ kind: 'truth', label: 'Truths uncovered', count: 3 }],
+  },
+  {
+    id: 'act2.armed',
+    act: 2,
+    optional: true,
+    title: 'Something to Shoot With',
+    summary: 'Gather parts and let MOONLINK build you a blaster before you touch a crystal.',
+    hint: 'The guardians under the anomalies only respect firepower. Gather 8 metal scrap, 2 iron ore from surface boulders, and scan 1 creature for a bio sample; MOONLINK assembles the blaster as soon as the parts are in your pack.',
+    transmission: 'MOONLINK: THE THINGS BELOW THE CRYSTALS DO NOT FEAR PICKAXES. BRING ME THE PARTS. I WILL MAKE YOU SOMETHING THAT BITES.',
+    objectives: [
+      { kind: 'collect', label: 'Metal scrap', item: 'metal-scrap', count: 8 },
+      { kind: 'collect', label: 'Iron ore', item: 'iron-ore', count: 2 },
+      { kind: 'scan', label: 'Creature scanned', count: 1 },
+    ],
   },
   {
     id: 'act2.moon-survey',

@@ -70,6 +70,7 @@ import {
 } from './survivors'
 import { TextLayer } from './text'
 import { QuestTracker, type CountField, type TrackerSnapshot } from './tracker'
+import { earthRotation, loadEarthRotation } from './erp'
 import { boulderAt, craterAt, createWorld, groundHeightAt, type Boulder, type Crater, type World } from './world'
 
 type Decal =
@@ -363,6 +364,7 @@ export class Game {
     this.ctx = ctx
     this.canvas = canvas
     this.text = new TextLayer(textCanvas)
+    loadEarthRotation()
 
     this.input.onAnyInput = () => this.audio.unlock()
     this.input.onKeyPress = (code) => this.handleMenuKey(code)
@@ -371,6 +373,7 @@ export class Game {
       app === 'quests' ? 'BRING THE ROCKET PARTS TO THE KESTREL' : app === 'map' ? 'SALVAGE THE NAV CHART INSIDE THE SHIP' : app === 'scan' ? 'CALIBRATES IN ACT II' : ''
     this.input.onTablet = () => {
       if (!this.playing || this.inventory.open) return
+      loadEarthRotation()
       this.tablet.toggle()
       this.sound(this.tablet.open ? 'tabletOpen' : 'tabletClose')
     }
@@ -734,13 +737,18 @@ export class Game {
           this.fade = 0.8
           tracker.toastMessage('YOU SLEEP FOR AN HOUR IN A REAL BUNK. NOBODY KNOCKS.', '#9fe1cb')
         } }
-      case 'dish':
+      case 'dish': {
         if (tracker.dishTuned) return { title: 'RADIO DISH', detail: 'TUNED. ANOMALIES SHOW ON YOUR MAP', ok: false }
-        return { title: '[E] TUNE THE DISH', detail: 'LISTEN FOR THE ANOMALIES', ok: true, run: () => {
+        const erp = earthRotation()
+        return { title: '[E] TUNE THE DISH', detail: erp ? `EARTH LOCK: IGS ERP ${erp.date}` : 'LISTEN FOR THE ANOMALIES', ok: true, run: () => {
           tracker.dishTuned = true
           this.sound('clue')
-          tracker.toastMessage('THE DISH LOCKS ON TO EVERY ANOMALY ON THE MOON. THEY ARE ALL POINTING AT YOU. (CHECK YOUR MAP)', '#c9a6ff')
+          const lock = earthRotation()
+          tracker.toastMessage(lock
+            ? `EARTH LOCK VIA IGS ERP ${lock.date}: UT1-UTC ${lock.ut1.toFixed(4)} s. THE DISH FINDS EVERY ANOMALY. THEY ARE ALL POINTING AT YOU. (CHECK YOUR MAP)`
+            : 'THE DISH LOCKS ON TO EVERY ANOMALY ON THE MOON. THEY ARE ALL POINTING AT YOU. (CHECK YOUR MAP)', '#c9a6ff')
         } }
+      }
       case 'solar':
         if (cd > this.time) return { title: 'SOLAR FARM', detail: `RECHARGING... ${Math.ceil(cd - this.time)}s`, ok: false }
         return { title: '[E] CHARGE A POWER CELL', detail: 'THE PANELS STILL WORK', ok: true, run: () => {
@@ -903,12 +911,19 @@ export class Game {
       this.sound('step')
       return
     }
+    this.hurtBoss(tier >= 3 ? 3 : tier >= 2 ? 2 : 1)
+  }
+
+  /** Any weapon damage to the guardian: pickaxe swings and blaster shots share this. */
+  private hurtBoss(amount: number): void {
+    const b = this.boss
+    if (!b || b.state === 'dead') return
     if (!bossVulnerable(b)) {
       this.sound('deny')
       this.spawnBurst(b.x, b.z, b.y + 2, 4, '#9aa2cf', 2)
       return
     }
-    b.hp -= tier >= 3 ? 3 : tier >= 2 ? 2 : 1
+    b.hp -= amount
     b.hitFlash = 0.15
     this.spawnBurst(b.x, b.z, b.y + 2, 10, '#efe3ff', 4)
     this.sound('enemyHit')
@@ -925,6 +940,14 @@ export class Game {
     const b = this.boss
     if (!b) return
     ;[this.player.x, this.player.z] = clampToArena(this.player.x, this.player.z)
+    // Blaster shots land while the guardian is open, so the gun is the real answer here.
+    for (const p of this.projectiles) {
+      if (!p.friendly || p.life <= 0) continue
+      if (Math.hypot(p.x - b.x, p.z - b.z) < (b.kind === 'jelly' ? 4 : 2.6)) {
+        p.life = 0
+        this.hurtBoss(2)
+      }
+    }
     const ev = updateBoss(b, dt, this.player.x, this.player.z, this.player.grounded)
     if (ev.hurtPlayer > 0 && this.deadTimer <= 0) this.damagePlayer(ev.hurtPlayer)
     if (ev.sound) this.sound(ev.sound)
@@ -1080,7 +1103,7 @@ export class Game {
       ...ANOMALIES.filter((a) => !this.tracker.anomalies.includes(a.id)).map((a) => ({ x: a.x, z: a.z, label: 'ANOMALY', color: '#c9a6ff' })),
       ...this.surface.gardens.filter((g) => !g.farm && this.cropsIn(g) > 0).map((g) => ({ x: g.x, z: g.z, label: 'FOOD', color: '#7fcf6a' })),
     ]
-    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface, lifeSigns, waypoint: this.onSurface ? this.waypoint : null }
+    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface, lifeSigns, waypoint: this.onSurface ? this.waypoint : null, erp: earthRotation() }
   }
 
   devLocations(): DevLocation[] {
@@ -1284,6 +1307,14 @@ export class Game {
 
   tabletHome(): void {
     this.tablet.back()
+  }
+
+  /** Opens the A.I. app for a spoken question. False when the player is not in play. */
+  openAssistant(): boolean {
+    if (!this.playing || !this.cutscene.done || this.inventory.open || this.lobbyOpen) return false
+    if (!this.tablet.open) this.sound('tabletOpen')
+    this.tablet.openAssistant()
+    return true
   }
 
   /** Listens for the tablet's A.I. app opening/closing; emits its screen rect in game pixels. */
@@ -2936,6 +2967,14 @@ export class Game {
         continue
       }
       if (tracker.bosses.length < 2) {
+        if (!tracker.hasItem('blaster')) {
+          consider(anomaly.x, anomaly.z, 0, ANOMALY_RANGE, () => ({
+            title: 'ANOMALY',
+            detail: 'IT WILL NOT OPEN FOR BARE HANDS. FIND A BLASTER — TAB › QUESTS.',
+            ok: false,
+          }))
+          continue
+        }
         consider(anomaly.x, anomaly.z, 0, ANOMALY_RANGE, () => ({
           title: '[E] TOUCH THE ANOMALY',
           detail: 'SOMETHING BELOW IT IS WAITING FOR YOU',
