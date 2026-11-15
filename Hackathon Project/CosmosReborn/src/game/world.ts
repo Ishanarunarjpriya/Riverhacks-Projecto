@@ -1,5 +1,8 @@
+import { ANOMALIES } from './anomalies'
+import { BASE_CENTER, BASE_RADIUS } from './base'
 import { WORLD_SIZE } from './constants'
 import { createRng, wrap } from './math'
+import { createPickups, type Pickup } from './pickups'
 import { STRUCTURES, type Structure } from './structures'
 
 export interface Crater {
@@ -14,6 +17,11 @@ export interface Boulder {
   x: number
   z: number
   r: number
+  height: number
+  yaw: number
+  hp: number
+  broken: boolean
+  shake: number
 }
 
 export interface Pebble {
@@ -26,27 +34,34 @@ export interface World {
   pits: Crater[]
   pebbles: Pebble[]
   boulders: Boulder[]
-  structures: readonly Structure[]
+  structures: Structure[]
+  pickups: Pickup[]
 }
 
 export const CRATER_FLOOR_RATIO = 0.7
-const PIT_FALL_RATIO = 0.75
+export const BOULDER_HITS = 3
 const MIN_PIT_RADIUS = 3.5
 const MAX_PIT_DEPTH = 3.5
+const MAX_BOULDER_HEIGHT = 3.6
 const SPAWN_CLEAR_RADIUS = 18
 
 export function createWorld(seed = 11): World {
   const rng = createRng(seed)
+  const structures = [...STRUCTURES]
+  const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(wrap(ax - bx), wrap(az - bz))
   const tooClose = (x: number, z: number, margin: number) =>
-    STRUCTURES.some((s) => Math.hypot(wrap(x - s.x), wrap(z - s.z)) < s.radius + margin) ||
-    Math.hypot(wrap(x), wrap(z)) < SPAWN_CLEAR_RADIUS
+    structures.some((s) => dist(x, z, s.x, s.z) < s.radius + margin) ||
+    ANOMALIES.some((a) => dist(x, z, a.x, a.z) < 6 + margin) ||
+    dist(x, z, 0, 0) < SPAWN_CLEAR_RADIUS ||
+    dist(x, z, BASE_CENTER.x, BASE_CENTER.z) < BASE_RADIUS + margin
 
   const craters: Crater[] = []
-  for (let i = 0; i < 380; i++) {
+  for (let i = 0; i < 420; i++) {
     const x = rng() * WORLD_SIZE
     const z = rng() * WORLD_SIZE
     const r = 2 + rng() * rng() * 12
     if (tooClose(x, z, r + 6)) continue
+    if (craters.some((c) => dist(x, z, c.x, c.z) < (c.r + r) * 1.25 + 2)) continue
     const isPit = r >= MIN_PIT_RADIUS
     craters.push({ x, z, r, isPit, depth: isPit ? Math.min(MAX_PIT_DEPTH, 1.2 + r * 0.3) : r * 0.3 })
   }
@@ -55,27 +70,63 @@ export function createWorld(seed = 11): World {
   for (let i = 0; i < 1400; i++) pebbles.push({ x: rng() * WORLD_SIZE, z: rng() * WORLD_SIZE })
 
   const boulders: Boulder[] = []
-  for (let i = 0; i < 70; i++) {
-    const x = rng() * WORLD_SIZE
-    const z = rng() * WORLD_SIZE
-    if (!tooClose(x, z, 4)) boulders.push({ x, z, r: 0.8 + rng() * 1.6 })
+  const addBoulder = (x: number, z: number) => {
+    const r = 0.8 + rng() * rng() * 2.4
+    if (tooClose(x, z, r + 3)) return
+    if (craters.some((c) => dist(x, z, c.x, c.z) < c.r * 1.35 + r)) return
+    if (boulders.some((b) => dist(x, z, b.x, b.z) < b.r + r + 1)) return
+    boulders.push({ x, z, r, height: Math.min(MAX_BOULDER_HEIGHT, r * 1.3), yaw: rng() * Math.PI, hp: BOULDER_HITS, broken: false, shake: 0 })
   }
+  for (let i = 0; i < 26; i++) {
+    const a = rng() * Math.PI * 2
+    const r = 24 + rng() * 80
+    addBoulder(Math.cos(a) * r, Math.sin(a) * r)
+  }
+  for (let i = 0; i < 260; i++) addBoulder(rng() * WORLD_SIZE, rng() * WORLD_SIZE)
 
-  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures: STRUCTURES }
+  const pickups = createPickups(rng, craters, (x, z, margin) =>
+    structures.some((s) => dist(x, z, s.x, s.z) < s.radius + margin) ||
+    dist(x, z, BASE_CENTER.x, BASE_CENTER.z) < BASE_RADIUS + margin ||
+    boulders.some((b) => dist(x, z, b.x, b.z) < b.r + margin),
+  )
+
+  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups }
+}
+
+export function craterAt(world: World, x: number, z: number): Crater | null {
+  for (const c of world.craters) {
+    if (Math.abs(wrap(x - c.x)) > c.r || Math.abs(wrap(z - c.z)) > c.r) continue
+    if (Math.hypot(wrap(x - c.x), wrap(z - c.z)) < c.r) return c
+  }
+  return null
 }
 
 export function pitAt(world: World, x: number, z: number): Crater | null {
-  for (const c of world.pits) {
-    const dx = wrap(x - c.x)
-    const dz = wrap(z - c.z)
-    if (dx * dx + dz * dz < (c.r * PIT_FALL_RATIO) ** 2) return c
+  const c = craterAt(world, x, z)
+  return c && c.isPit ? c : null
+}
+
+export function craterHeight(c: Crater, x: number, z: number): number {
+  const d = Math.hypot(wrap(x - c.x), wrap(z - c.z))
+  if (d >= c.r) return 0
+  if (d <= c.r * CRATER_FLOOR_RATIO) return -c.depth
+  const t = (c.r - d) / (c.r * (1 - CRATER_FLOOR_RATIO))
+  return -c.depth * (1 - (1 - t) ** 2)
+}
+
+export function boulderAt(world: World, x: number, z: number, pad = 0): Boulder | null {
+  for (const b of world.boulders) {
+    if (b.broken) continue
+    if (Math.hypot(wrap(x - b.x), wrap(z - b.z)) < b.r + pad) return b
   }
   return null
 }
 
 export function groundHeightAt(world: World, x: number, z: number): number {
-  const pit = pitAt(world, x, z)
-  return pit ? -pit.depth : 0
+  const crater = craterAt(world, x, z)
+  const base = crater ? craterHeight(crater, x, z) : 0
+  const boulder = boulderAt(world, x, z, 0.5)
+  return boulder ? Math.max(base, boulder.height) : base
 }
 
 export function isSolidAt(world: World, x: number, z: number): boolean {

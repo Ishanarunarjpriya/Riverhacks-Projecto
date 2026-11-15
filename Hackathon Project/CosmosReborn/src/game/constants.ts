@@ -15,10 +15,14 @@ export const HORIZON_D = Math.sqrt(HORIZON_D2)
 export const SKY_SPIN = 2
 export const SUN_DIR: readonly [number, number] = [Math.SQRT1_2, Math.SQRT1_2]
 
-export const WALK_SPEED = 26
-export const TURN_SPEED = 1.7
+export const WALK_SPEED = 15
+export const WALK_ACCEL = 45
+export const TURN_SPEED = 1.8
 export const JUMP_VELOCITY = 10
 export const GRAVITY = 12
+export const JUMP_COOLDOWN = 0.45
 export const STEP_HEIGHT = 0.35
+export const MAX_PIT_SLOPE = 1.6
+export const CLIMB_SLOWDOWN = 0.9
 
 export const SHOW_MINIMAP = false

@@ -29,6 +29,8 @@ interface ShootingStar {
 }
 
 const SKY_COLOR = '#0d0b2a'
+const REAL_TIME = -1
+const HOUR_MS = 3_600_000
 const TRAIL = ['#ffffff', '#d9d6ff', '#a9a4e0', '#7b76b8', '#57528f', '#3d3a6e']
 
 function directionOf(azimuthDeg: number, elevationDeg: number): Vec3 {
@@ -185,7 +187,7 @@ export class Sky {
       [orb(5, '#2f6fd8', '#7fb2ff'), 1.2, -20, 9],
       [orb(5, '#8a4fd8', '#c9a6ff'), 1.4, 47, 20],
       [orb(6, '#d23a2c', '#ff8a7a'), 1.1, 78, 3],
-      [earth(), 4, 140, 24],
+      [earth(), REAL_TIME, 140, 24],
       [sun(), 3, 215, 30],
       [orb(4, '#8a4fd8', '#c9a6ff'), 1.3, 260, 14],
       [galaxyFrames, 2, 300, 40],
@@ -273,7 +275,11 @@ export class Sky {
     for (const o of this.objects) {
       const p = toScreen(o.dir)
       if (!p || p[0] < -60 || p[0] > SCREEN_W + 60 || p[1] < -60 || p[1] > SCREEN_H + 60) continue
-      const frame = o.frames[Math.floor(time * o.fps + o.phase) % o.frames.length]
+      const index =
+        o.fps === REAL_TIME
+          ? Math.floor((((Date.now() / HOUR_MS) % 24) / 24) * o.frames.length)
+          : Math.floor(time * o.fps + o.phase) % o.frames.length
+      const frame = o.frames[index]
       ctx.drawImage(frame, Math.round(p[0] - frame.width / 2), Math.round(p[1] - frame.height / 2))
     }
 

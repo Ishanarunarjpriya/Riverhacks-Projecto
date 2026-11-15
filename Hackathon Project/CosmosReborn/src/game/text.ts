@@ -54,6 +54,21 @@ export class TextLayer {
     this.ctx.clearRect(x, y, w, h)
   }
 
+  rect(color: string, x: number, y: number, w: number, h: number): void {
+    this.ctx.globalAlpha = this.alpha
+    this.ctx.fillStyle = color
+    this.ctx.fillRect(x, y, w, h)
+    this.ctx.globalAlpha = 1
+  }
+
+  image(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number): void {
+    const { ctx } = this
+    ctx.imageSmoothingEnabled = false
+    ctx.globalAlpha = this.alpha
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
+    ctx.globalAlpha = 1
+  }
+
   private font({ size = 7, weight = 600 }: TextStyle): string {
     return `${weight} ${size}px ${FONT_FAMILY}`
   }

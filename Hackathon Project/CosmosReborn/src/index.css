@@ -1,34 +1,41 @@
 html,
-body,
-#root {
+body {
   margin: 0;
+  padding: 0;
+  width: 100%;
   height: 100%;
   background: #05040f;
   overflow: hidden;
 }
 
 #root {
+  position: fixed;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .game-frame {
   position: relative;
-  width: min(100vw, calc(100vh * 16 / 9));
-  aspect-ratio: 16 / 9;
+  flex: none;
+  width: 320px;
+  height: 180px;
 }
 
 .game-canvas,
 .game-text {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   display: block;
 }
 
 .game-canvas {
+  image-rendering: crisp-edges;
   image-rendering: pixelated;
 }
 
