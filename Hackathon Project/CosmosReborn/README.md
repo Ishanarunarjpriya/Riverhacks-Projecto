@@ -99,7 +99,9 @@ What the panel shows, straight from Gemini's response:
 - Up to 4 `references` as a SOURCES list of numbered links (`[1]`, `[2]`, ...) under the answer.
 - Up to 2 suggested follow-ups as dashed chips; tapping one sends it as the next question.
 
-Answers are deliberately short: the persona caps them at one paragraph of about 35 words, so a reply fits the tablet screen without scrolling.
+Answers are deliberately short: the persona caps them at one paragraph of about 55 words, so a reply fits the tablet screen without scrolling.
+
+Every request carries the persona, the game guide, the player's live status (active quest, progress, inventory, location, nearest resources) and the question. That prompt is held under 7,000 characters: SerpApi answers a longer `q` with an empty `400` after about a minute, and reading that empty body is what used to surface as `LINK FAILED: UNEXPECTED END OF JSON INPUT`. Responses are now read as text and parsed defensively, so a failure prints something usable (`GEMINI WENT SILENT (HTTP 400)`, `GEMINI TOOK TOO LONG`), and a dropped connection is retried once.
 
 **Persona:** before the first question, the server briefs Gemini as MOONLINK — the damaged core of a lander called the Kestrel: ominous, clipped, second person, treating the dark and the dust as things that listen. The briefing forbids it from inventing game rules, quest objectives, inventory or map locations, so hints stay in-fiction without contradicting the quest tracker. Because the thread is kept with a token, the voice carries through follow-ups for free.
 

@@ -7,6 +7,14 @@
 export const CACHE_TTL = 10 * 60 * 1000
 export const REFERENCE_LIMIT = 4
 
+/**
+ * SerpApi answers a long `q` with an empty 400 after about a minute, which is
+ * what used to surface as "unexpected end of JSON input". 7000 characters of
+ * prompt stays well inside the limit and answers in a few seconds.
+ */
+const MAX_PROMPT = 7000
+const MAX_CONTEXT = 720
+
 const ENTITIES = { '&nbsp;': ' ', '&amp;': '&', '&quot;': '"', '&#39;': "'", '&lt;': '<', '&gt;': '>' }
 
 function clean(value) {
@@ -37,22 +45,42 @@ How to help:
 - The mystery of why survivors can breathe without helmets, and who the suits are, is the game's secret. Hint at it, never explain it.`
 
 const GAME_GUIDE = `GAME GUIDE
-Cosmos Reborn is a pixel-art Moon survival game made for the NASA Space Apps hackathon. The player crash-landed on the Moon in the Kestrel and can somehow breathe without a helmet.
-Controls: W/S or arrow keys walk, A/D or left/right turn, Space jumps (needed to climb out of deep craters and over rocks), E interacts (pick up, build, mine, inspect, scan, talk), Q or mouse click fires the blaster, Tab opens the tablet (MAP, QUESTS, A.I., SCAN apps), F opens the inventory (drag items between slots), 1-5 pick a hotbar slot, M mutes. Tools only work while held in the selected hotbar slot. Building: hold moon rocks or crescent shards and click to place a block (moonstone or crescent) in front of you, stack up to 4 high and jump onto them; X or right-click takes the block back.
-World: the Moon wraps around, so walking straight loops back. The base site is the marked square beside the crashed lander at the Crash Site; the compass's amber marker points home. Regions: Crash Site, Sea of Stillness (habitat dome), Dust Basin (rover), Glass Fields (solar farm and the sealed hatch), Shattered Plains (crashed satellite), Frost Ridge (ice drill), Signal Highlands (radio dish). The tablet MAP shows structures you have found.
-Where things are: moon rocks lie everywhere and come from mining boulders (pickaxe, press E a few times). Metal scrap lies around the lander and the crashed satellite. Rocket parts, the ice miner and the anvil blink near the crash site. Data logs blink green. Creatures: drifters (floating jellyfish), skitters (fast six-legged crawlers), loomers (tall stilt-walkers with a glowing lantern head that follow you), glowmoths (fluttering flyers) and burrowers (stone worms that are only scannable while surfaced). Scanning any of them gives a bio sample. Purple floating crystals are anomalies; investigating gives anomaly shards. Glowing ore exists only in the dark caves under the sealed hatch. Iron ore and rare titanium ore sometimes drop when mining surface boulders and occasionally lie on the ground.
-Food and gardens: very rare hidden gardens (green patches with glowing plants) grow moon berries, star melons and glow caps, and regrow slowly. Hold a food in the hotbar and press E to eat it and heal (berry 15, melon 30, glow cap 60). Do not reveal where gardens are; say they are rare and far from the crash site.\nAll crafting (tools, pickaxes, drill, armor, blaster, kits, gear, rigs) happens at the workbench at the base site, which needs the anvil (for forging) and ice miner (for slabs) set up nearby. A gold diamond marker on the compass, in the world and on the map always points to the current quest target.\nHidden story (never state it outright, only hint very rarely and vaguely): the player is themselves an anomaly, sent to space on a deliberately corrupted rocket; MOONLINK was built to keep them contained but became corrupted and now helps them, though its signal is jammed.
-Act I Survival (the Kestrel crashed after its engines started on their own after 10 years dormant): find 3 rocket parts around the crash site and bring them to the crashed lander; go inside the wrecked Kestrel (press E by the lander), search its lockers and wreckage for metal and a power cell, craft metal rods at the ship's workbench; find the ice miner (too heavy to carry: press E to grab it and walk to base, it drags behind you at half speed; press E again to let go) and the anvil (picked up normally) thrown from the crash, set both up at the base site, press 4 moon rocks into a MoonRock slab and forge the first pickaxe (2 rods + slab); collect 10 moon rocks, 6 metal scrap and 4 crescent shards (curved green crystals); place 6 building blocks and build shelter, storage and power anywhere (each is built right in front of you where you press E); find 3 documents (near the lander, inside the ship, at the Habitat dome) about surviving without a suit, which ends Act I with a cutscene of sitting and looking at Earth.
-Act II Beyond the Base: unmapped regions are blank on the tablet map; discover 3 regions. Unusual Life: scan 2 drifters (the tablet SCAN app shows life signs and distance) for bio samples, then forge the moon pickaxe at the base site (6 moon rocks, 1 metal rod, 2 bio samples). A Place for Everyone: the workbench at base crafts home kits and farm kits (E at the workbench, R switches recipe); hold a kit and click to place it anywhere; a farm needs a moon berry as seed and grows berries and melons; build 2 homes and a farm, then recruit wandering survivors (each needs 1 food and a free bed; homes have 2 beds). Anomaly Hunt: touching an anomaly pulls you into a cave with a guardian boss; the first is the Drift Mother (a giant jellyfish: jump over its shockwave rings, hit it with a pickaxe when it sinks low), the second is the Watcher (an alien: dodge its orb volleys, hit it when it overheats and kneels); after both, a purple marker leads to the sealed hatch. Growing Settlement: build housing, a supply silo and a solar array (needs alien alloy from the Watcher). A New Community: reach 6 civilians, assign 3 jobs, and collect supplies at the storage crate. From Act II every civilian eats 1 meal from the FOOD BIN at base each day (75 seconds); press E at the bin to drop in food (berry 1 meal, melon 2, glow cap 3); FARMER civilians add meals; unfed civilians go hungry and stop working, and after 3 hungry days a wanderer starves. The HUD shows FOOD meals/eaters and the time to the next meal.
-Act III Three Strangers: Maya, Okoro and Lena first appear at the start of Act III near the housing; talk to all three (E). Into the Depths: forge a titanium pickaxe (3 titanium ore from boulders, 2 metal rods, 1 alien alloy; it cracks boulders in one swing) and a power drill at the base site, hold the drill at the sealed hatch and press E to enter the caves. Buried Resources: bring 6 glowing ore back to base. Gear Up: craft armor plating and a blaster (hold it, fire with Q or click). First Attack: defeat 3 suits; while you fight, other suits raid the settlement and take some civilians (graves mark them). Arm the Survivors: the workbench now crafts survivor gear (glowing ore, scrap, iron ore); hold it near 3 civilians and press E. Familiar Faces: search a fallen suit's gear for papers. Defend the Settlement: build a turret and survive the wave on the base. Hidden Cavern: find the glowing chamber far south-east of the cave ladder; it holds titanium and a log.
-Act IV A Way Home: talk to Maya at the settlement to promise everyone a way home; she gives a launch pad kit; hold it and click on open ground to start the rocket. Blueprints for Escape (findable any time in Act IV): frame from asking Okoro, engine from searching the crashed invader dropship far south-east, controls from an old terminal in the caves, fuel storage by holding the power drill at the Ice Drill (also gives rocket fuel), passenger space by searching the Habitat dome. Build Together: press E at the rocket to build sections you have blueprints for (R switches options); 2 sections is the first milestone. Under Attack: suits raid the rocket; raids repeat every few minutes and damage rocket sections and buildings, which smoke. Repair and Rebuild: press E at damaged things to repair (scrap, plus a rod for rocket parts) and build a rocket turret. The Hard Choice: at the rocket, choose to take everyone or leave alone (R switches, E confirms); it decides the ending. Optional Leave No One Behind: add a passenger bay and load 10 food into the rocket.
-Act V One Way Home: Final Assembly, build all 5 rocket sections (100%). Fuel for the Journey: water ice hides in permanently shadowed craters (frosty blue floors, light blue on the tablet map) because their floors never see sunlight and stay around minus 230 C, just like real craters at the lunar poles (NASA's LCROSS found about 5-6% water in Cabeus crater in 2009). Hold the power drill inside one and press E to drill lunar ice, or craft an ice rig at the workbench and place it in an icy crater to drill automatically. Take the ice to the ice miner at base: with working power it melts the ice and splits the water by electrolysis into hydrogen and oxygen, which is real rocket propellant. Load 12 fuel into the rocket. Preflight Check: at the rocket test power, engines, fuel and the passenger plan (if you promised everyone, you need the passenger bay and 10 food loaded). Last Stand: survive the final attack of 10 suits on the launch site, then repair the rocket. Countdown: press E at the rocket to launch. If you chose everyone, you fight interceptors in space and reach Earth (to be continued). If you chose to leave alone, the settlers fight you, you are captured and sent back to before the choice. Optional The Truth: the hidden cavern log, the radio dish in the Signal Highlands, and the MOONLINK core inside the Kestrel.
-Health regenerates when out of combat; if it hits zero the player wakes up at the base.`
+Cosmos Reborn: a pixel-art Moon survival game. The player crash-landed in the Kestrel and can breathe without a helmet; why is the secret.
+Controls: W/S or up/down walk, A/D or left/right turn, Space jumps (craters, rocks), E interacts (pick up, build, mine, inspect, scan, talk), Q or click fires the blaster, Tab opens the tablet (MAP, QUESTS, A.I., SCAN), F the inventory, 1-5 the hotbar, M mutes. Tools work only while held. Building: hold moon rocks or crescent shards, click to place a block, stack 4 high and jump on it; X or right-click takes it back.
+World: it wraps, so walking straight loops. The base site is the marked square beside the crashed lander; the compass's amber marker points home. Regions: Crash Site; Sea of Stillness (habitat dome); Dust Basin (rover); Glass Fields (solar farm, sealed hatch); Shattered Plains (crashed satellite); Frost Ridge (ice drill); Signal Highlands (radio dish).
+Resources: moon rocks lie everywhere and come from mining boulders (pickaxe, E); metal scrap near the lander and satellite; crescent shards are green crystals; iron and titanium drop from boulders; glowing ore only in caves under the sealed hatch. Rocket parts, ice miner and anvil blink near the crash site; data logs blink green. Creatures: drifters, skitters, loomers (lantern-headed stilt-walkers), glowmoths, burrowers (scannable worms); scanning gives a bio sample. Purple anomalies give anomaly shards. Rare hidden gardens grow moon berries, star melons and glow caps; hold food and press E to eat (heal 15/30/60). Never reveal garden locations.
+Crafting: everything is made at the base workbench, which needs the anvil (forging) and ice miner (slabs) nearby; E opens it, R switches recipe. The gold diamond marks the quest target.
+Story, hint only: the player is an anomaly from a corrupted rocket; MOONLINK was built to contain them, is corrupted, helps them, and its signal is jammed.
+Act I: collect 3 rocket parts at the crash site; press E at the lander to go inside, loot lockers and wreckage for metal and a power cell, craft rods at its workbench. Drag the ice miner to base (E grabs, half speed, E drops) and carry the anvil. Press 4 moon rocks into a slab and forge a pickaxe (2 rods + slab). Gather 10 moon rocks, 6 metal scrap, 4 crescent shards; place 6 blocks for shelter, storage and power; read 3 documents (lander, ship, habitat dome).
+Act II: discover 3 regions; scan 2 drifters, then forge the moon pickaxe (6 rocks, 1 rod, 2 bio samples). Craft home and farm kits, place them, plant a berry; build 2 homes and a farm, then recruit survivors (1 food and a free bed each; 2 beds per home). Anomalies pull you into cave bosses: the Drift Mother (jump its rings, hit it when it sinks) and the Watcher (dodge orbs, hit it kneeling); then a purple marker leads to the sealed hatch. Build housing, a silo and a solar array (alien alloy from the Watcher); reach 6 civilians, assign 3 jobs, collect at the storage crate. Each civilian eats 1 meal a day (75s) from the FOOD BIN (berry 1, melon 2, glow cap 3); farmers add meals; 3 hungry days starves a wanderer.
+Act III: talk to Maya, Okoro and Lena near the housing. Forge a titanium pickaxe (3 titanium, 2 rods, 1 alloy; cracks boulders in one swing) and a power drill; hold the drill at the sealed hatch and press E, then bring 6 glowing ore back. Craft armor and a blaster. Defeat 3 suits; suits raid and take civilians (graves mark them). Craft survivor gear, hold it near 3 civilians and press E. Search a fallen suit for papers. Build a turret and survive the wave.
+Act IV: promise Maya everyone gets home; she gives the launch pad kit, clicked on open ground. Blueprints: frame from Okoro, engine from the invader dropship far south-east, controls from a cave terminal, fuel storage by holding the power drill at the Ice Drill (also gives fuel), passenger space at the Habitat dome. Press E at the rocket to build (R switches); 2 sections is the first milestone. Raids damage sections and buildings (E repairs with scrap and rods); build a rocket turret. At the rocket choose everyone or alone (R, E); it decides the ending.
+Act V: build all 5 sections. Water ice hides in permanently shadowed craters (frosty blue floors, light blue on the map, about -230C). Hold the power drill there and press E, or place an ice rig. Melt the ice at the ice miner: electrolysis splits water into hydrogen and oxygen, real propellant. Load 12 fuel. Test power, engines, fuel and the passenger plan. Survive 10 suits, repair, press E to launch. Everyone: fight interceptors to Earth. Alone: the settlers capture you and send you back to the choice.
+Health regenerates out of combat; at zero you wake at the base.`
 
-function prompt(query, context, firstTurn) {
-  const live = context ? `LIVE STATUS (the player's game right now): ${context}` : 'LIVE STATUS: unavailable.'
-  const intro = firstTurn ? `${PERSONA}\n\n${GAME_GUIDE}\n\n` : 'Stay in character as MOONLINK and keep using the GAME GUIDE from earlier.\n'
-  return `${intro}${live}\n\nPlayer's question: ${query}`
+/** Trim at a sentence or line break so a cut never lands mid-word. */
+function clip(text, room) {
+  if (text.length <= room) return text
+  if (room <= 0) return ''
+  const slice = text.slice(0, room)
+  const stop = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('\n'))
+  return stop > room * 0.6 ? slice.slice(0, stop + 1) : slice
+}
+
+export function buildPrompt(query, context, firstTurn) {
+  const live = context
+    ? `LIVE STATUS (the player's game right now): ${context.slice(0, MAX_CONTEXT)}`
+    : 'LIVE STATUS: unavailable.'
+
+  if (!firstTurn) {
+    const tail = `Stay in character as MOONLINK and keep using the GAME GUIDE from earlier.\n${live}\n\nPlayer's question: ${query}`
+    return clip(tail, MAX_PROMPT)
+  }
+
+  const head = `${PERSONA}\n\n`
+  const tail = `\n\n${live}\n\nPlayer's question: ${query}`
+  const guide = clip(GAME_GUIDE, MAX_PROMPT - head.length - tail.length)
+  return `${head}${guide}${tail}`
 }
 
 /**
@@ -123,16 +151,50 @@ function toReferences(data) {
 
 const cache = new Map()
 
-async function askGemini(query, context, token, key) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * One SerpApi call. The body is read as text first: a too-long query (or a
+ * SerpApi hiccup) comes back as an empty response, and response.json() on that
+ * throws "Unexpected end of JSON input" with no clue for the player.
+ */
+async function requestGemini(query, context, token, key) {
   const target = new URL('https://serpapi.com/search.json')
   target.searchParams.set('engine', 'google_gemini')
   // The persona rides on the opening turn and stays in the thread afterwards.
-  target.searchParams.set('q', prompt(query, context, !token))
+  target.searchParams.set('q', buildPrompt(query, context, !token))
   target.searchParams.set('api_key', key)
   // Gemini only keeps a conversation briefly; a stale token restarts the thread.
   if (token) target.searchParams.set('subsequent_request_token', token)
-  const response = await fetch(target, { signal: AbortSignal.timeout(30000) })
-  return response.json()
+
+  let response
+  try {
+    response = await fetch(target, { signal: AbortSignal.timeout(30000) })
+  } catch (error) {
+    const name = String(error?.name ?? '')
+    const timeout = name === 'TimeoutError' || name === 'AbortError'
+    console.warn(`SerpApi ${timeout ? 'timed out' : 'request failed'}: ${error?.message ?? 'unknown'}`)
+    return { error: timeout ? 'GEMINI TOOK TOO LONG' : 'GEMINI COULD NOT BE REACHED', transient: true }
+  }
+
+  const raw = await response.text().catch(() => '')
+  if (!raw.trim()) {
+    console.warn(`SerpApi ${response.status} with an empty body (prompt ${target.searchParams.get('q')?.length ?? 0} chars)`)
+    return {
+      error: `GEMINI WENT SILENT (HTTP ${response.status})`,
+      transient: response.status >= 500 || response.status === 429,
+    }
+  }
+
+  try {
+    return JSON.parse(raw)
+  } catch {
+    console.warn(`SerpApi ${response.status} sent unreadable JSON: ${raw.slice(0, 200)}`)
+    return {
+      error: `GEMINI SENT A BROKEN REPLY (HTTP ${response.status})`,
+      transient: response.status >= 500 || response.status === 429,
+    }
+  }
 }
 
 /**
@@ -141,7 +203,7 @@ async function askGemini(query, context, token, key) {
  * share the same validation, caching and error shape.
  */
 export async function answerAssist({ query, token, key, context }) {
-  const question = String(query ?? '').trim().slice(0, 400)
+  const question = String(query ?? '').trim().slice(0, 200)
   if (!question) return { status: 400, body: { error: 'ASK SOMETHING FIRST' } }
   if (!key) return { status: 503, body: { error: 'SERPAPI_KEY IS MISSING FROM .env' } }
 
@@ -151,24 +213,31 @@ export async function answerAssist({ query, token, key, context }) {
   const cached = cache.get(cacheKey)
   if (cached && Date.now() - cached.at < CACHE_TTL) return { status: 200, body: cached.body }
 
-  try {
-    let data = await askGemini(question, live, thread, key)
-    // An expired or rejected token must not kill the chat: retry as a fresh question.
-    if (data?.error && thread) data = await askGemini(question, live, null, key)
-    if (data?.error) return { status: 502, body: { error: String(data.error).toUpperCase().slice(0, 160) } }
+  let data = await requestGemini(question, live, thread, key)
 
-    const blocks = toBlocks(data.text_blocks)
-    const body = {
-      query: question,
-      blocks,
-      answer: blocks.length ? null : markdownToText(data.reconstructed_markdown) || null,
-      results: toReferences(data),
-      followUps: toFollowUps(data),
-      token: typeof data.subsequent_request_token === 'string' ? data.subsequent_request_token : null,
-    }
-    cache.set(cacheKey, { at: Date.now(), body })
-    return { status: 200, body }
-  } catch (error) {
-    return { status: 502, body: { error: `LINK FAILED: ${error?.message ?? 'UNKNOWN'}`.toUpperCase().slice(0, 120) } }
+  // A stale token or a dropped connection restarts the thread instead of failing.
+  if (data?.error && thread) {
+    if (data.transient) await sleep(500)
+    data = await requestGemini(question, live, null, key)
   }
+  if (data?.error && data.transient) {
+    await sleep(1200)
+    data = await requestGemini(question, live, null, key)
+  }
+  if (data?.error) {
+    console.warn(`assist failed for "${question.slice(0, 80)}": ${data.error}`)
+    return { status: 502, body: { error: String(data.error).toUpperCase().slice(0, 160) } }
+  }
+
+  const blocks = toBlocks(data.text_blocks)
+  const body = {
+    query: question,
+    blocks,
+    answer: blocks.length ? null : markdownToText(data.reconstructed_markdown) || null,
+    results: toReferences(data),
+    followUps: toFollowUps(data),
+    token: typeof data.subsequent_request_token === 'string' ? data.subsequent_request_token : null,
+  }
+  cache.set(cacheKey, { at: Date.now(), body })
+  return { status: 200, body }
 }
