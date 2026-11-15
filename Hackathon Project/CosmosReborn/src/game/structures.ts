@@ -1,4 +1,5 @@
 import type { ItemId } from './items'
+import { coreModel, dropshipModel, rigModel, rocketModel, terminalModel } from './rocket'
 import { box, disc, dome, glowBox, panel, type ModelRenderer, type Part, type V3 } from './model3d'
 import { rect, type Ctx } from './pixel'
 
@@ -27,6 +28,14 @@ export type StructureKind =
   | 'workbench'
   | 'airlock'
   | 'debris'
+  | 'home'
+  | 'farm'
+  | 'grave'
+  | 'rocket'
+  | 'dropship'
+  | 'terminal'
+  | 'icerig'
+  | 'core'
 
 export interface Structure {
   kind: StructureKind
@@ -37,6 +46,7 @@ export interface Structure {
   mapColor: string
   yaw?: number
   discoverable?: boolean
+  damaged?: boolean
 }
 
 export interface Inspection {
@@ -301,6 +311,39 @@ function buildModel(kind: StructureKind, time: number): Part[] {
         box(-1.6, 1.6, 4.4, 4.6, -0.5, 0.5, '#fac775'),
         glowBox(-0.3, 0.3, 5, 5.4, -0.5, 0.5, '#5dcaa5'),
       ]
+    case 'rocket':
+      return rocketModel(time)
+    case 'dropship':
+      return dropshipModel(time)
+    case 'terminal':
+      return terminalModel(time)
+    case 'icerig':
+      return rigModel(time)
+    case 'core':
+      return coreModel(time)
+    case 'grave':
+      return [
+        box(-0.6, 0.6, 0, 0.3, -0.4, 0.4, '#6c719a', '#8a8fae'),
+        box(-0.12, 0.12, 0.3, 2, -0.1, 0.1, '#9aa0b8'),
+        box(-0.6, 0.6, 1.3, 1.55, -0.1, 0.1, '#9aa0b8'),
+        glowBox(-0.1, 0.1, 2, 2.15, -0.12, 0.12, '#fac775'),
+      ]
+    case 'home':
+      return [
+        box(-2.4, 2.4, 0, 0.3, -2, 2, '#9aa0b8', '#c9cbe0'),
+        box(-2.2, 2.2, 0.3, 3, -1.8, 1.8, '#e6e6ee', '#ffffff'),
+        box(-2.5, 2.5, 3, 3.5, -2.1, 2.1, '#e0884a', '#f2a066'),
+        box(-0.6, 0.6, 0.3, 2.2, 1.8, 1.85, '#3f4878'),
+        glowBox(1, 1.6, 1.6, 2.2, 1.8, 1.85, blink ? '#fac775' : '#a8742a'),
+      ]
+    case 'farm': {
+      const parts: Part[] = []
+      for (const [x0, z0, x1, z1] of [[-3.4, -3.4, 3.4, -3.2], [-3.4, 3.2, 3.4, 3.4], [-3.4, -3.4, -3.2, 3.4], [3.2, -3.4, 3.4, 3.4]]) {
+        parts.push(box(x0, x1, 0.5, 0.65, z0, z1, '#8a5a1e'))
+      }
+      for (const [x, z] of [[-3.3, -3.3], [3.3, -3.3], [-3.3, 3.3], [3.3, 3.3]]) parts.push(box(x - 0.15, x + 0.15, 0, 1, z - 0.15, z + 0.15, '#b07f2c'))
+      return parts
+    }
     case 'debris':
       return [
         box(-1.2, 0.9, 0, 1.3, -0.8, 1, '#4b5488', '#7c85b4'),

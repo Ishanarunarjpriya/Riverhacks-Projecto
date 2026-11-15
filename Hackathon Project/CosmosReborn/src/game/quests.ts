@@ -26,6 +26,24 @@ export type Objective =
   | { kind: 'ship'; label: string }
   | { kind: 'search'; label: string; count: number }
   | { kind: 'blocks'; label: string; count: number }
+  | { kind: 'place'; label: string; item: ItemId; count: number }
+  | { kind: 'civilians'; label: string; count: number }
+  | { kind: 'boss'; label: string; count: number }
+  | { kind: 'equip'; label: string; count: number }
+  | { kind: 'promise'; label: string }
+  | { kind: 'blueprints'; label: string; count: number }
+  | { kind: 'sections'; label: string; count: number }
+  | { kind: 'raid'; label: string; count: number }
+  | { kind: 'repair'; label: string; count: number }
+  | { kind: 'choice'; label: string }
+  | { kind: 'bay'; label: string }
+  | { kind: 'stock'; label: string; count: number }
+  | { kind: 'fuel'; label: string; count: number }
+  | { kind: 'preflight'; label: string; count: number }
+  | { kind: 'laststand'; label: string }
+  | { kind: 'intact'; label: string }
+  | { kind: 'launch'; label: string }
+  | { kind: 'truth'; label: string; count: number }
 
 export interface Quest {
   id: string
@@ -133,7 +151,7 @@ export const QUESTS: readonly Quest[] = [
     act: 2,
     title: 'Beyond the Base',
     summary: 'Discover 3 new Moon regions.',
-    hint: 'The Moon is split into named regions. Walk far from the crash site in any direction; the compass shows the region name when you cross into a new one.',
+    hint: 'Unmapped regions are blank on the tablet map. Walk far from the crash site in any direction; the compass shows the region name when you cross into a new one.',
     transmission: "...IF ANYONE CAN HEAR THIS, STAY AWAY FROM THE SUITS. THEY ARE NOT HERE TO RESCUE YOU...",
     objectives: [{ kind: 'region', label: 'New regions found', count: 3 }],
   },
@@ -141,19 +159,36 @@ export const QUESTS: readonly Quest[] = [
     id: 'act2.unusual-life',
     act: 2,
     title: 'Unusual Life',
-    summary: 'Scan 2 alien creatures and gather samples.',
-    hint: 'Glowing drifters float around most regions, and a couple wander near the crash site. Walk close and press E to scan one.',
-    transmission: 'TABLET: LIFE SIGNS DETECTED. CLASSIFICATION... UNKNOWN. CLASSIFICATION... FAMILIAR?',
-    objectives: [{ kind: 'scan', label: 'Creatures scanned', count: 2 }],
+    summary: 'Scan 2 alien creatures and forge a moon pickaxe from their samples.',
+    hint: 'Open the tablet SCAN app to see life signs and their direction. Walk up to a glowing drifter and press E to scan it for a bio sample. With 2 samples, 6 moon rocks and a metal rod, forge the moon pickaxe at the base site.',
+    transmission: 'TABLET: LIFE SIGNS DETECTED. CLASSIFICATION... UNKNOWN. CLASSIFICATION... SAME AS USER?',
+    objectives: [
+      { kind: 'scan', label: 'Creatures scanned', count: 2 },
+      { kind: 'build', label: 'Forge the moon pickaxe', part: 'moonpick' },
+    ],
+  },
+  {
+    id: 'act2.place-for-everyone',
+    act: 2,
+    title: 'A Place for Everyone',
+    summary: 'Build homes and a farm, then recruit survivors wandering the Moon.',
+    hint: 'Press E at the anvil to craft a home kit or farm kit (R switches recipe). Hold the kit and click to place it. A farm needs a moon berry as a seed: gardens are rare and far away. Each recruit costs 1 food and needs a free bed. The SCAN app shows where survivors are.',
+    transmission: 'MOONLINK: [SIGNAL JAMMED] ...THEY ARE NOT LIKE YOU. OR YOU ARE NOT LIKE THEM. FEED THEM ANYWAY.',
+    objectives: [
+      { kind: 'place', label: 'Homes built', item: 'home-kit', count: 2 },
+      { kind: 'place', label: 'Farm planted', item: 'farm-kit', count: 1 },
+      { kind: 'civilians', label: 'Civilians recruited', count: 3 },
+    ],
   },
   {
     id: 'act2.anomaly-hunt',
     act: 2,
     title: 'Anomaly Hunt',
-    summary: 'Investigate 2 anomalies and trace the strange signal.',
-    hint: 'Anomalies are floating purple crystals. After you investigate two, a purple marker on the compass and map points to the signal source.',
+    summary: 'Enter 2 anomalies, defeat what guards them, and trace the strange signal.',
+    hint: 'Anomalies are floating purple crystals. Press E to touch one and you are pulled into a cave below it. Hold a pickaxe; click or press E to strike the guardian only while it is weak (low to the ground or kneeling). After two, a purple marker leads to the signal.',
+    transmission: 'MOONLINK: CONTAINMENT PROTOCOL SAYS KEEP YOU AWAY FROM THE CRYSTALS. I AM IGNORING CONTAINMENT PROTOCOL.',
     objectives: [
-      { kind: 'anomaly', label: 'Anomalies investigated', count: 2 },
+      { kind: 'boss', label: 'Guardians defeated', count: 2 },
       { kind: 'signal', label: 'Find the signal source' },
     ],
   },
@@ -162,7 +197,7 @@ export const QUESTS: readonly Quest[] = [
     act: 2,
     title: 'Growing Settlement',
     summary: 'Build housing, a supply silo, and a solar array.',
-    hint: 'Go back to the base site and press E to build. The silo needs a bio sample from a scanned drifter; the array needs 2 anomaly shards.',
+    hint: 'Go back to the base site and press E to build. The silo needs a bio sample; the solar array needs alien alloy from the Watcher.',
     transmission: "TABLET: SETTLEMENT PERMITS... APPROVED? NOBODY SHOULD BE APPROVING ANYTHING UP HERE.",
     objectives: [
       { kind: 'build', label: 'Build housing', part: 'housing' },
@@ -174,11 +209,12 @@ export const QUESTS: readonly Quest[] = [
     id: 'act2.new-community',
     act: 2,
     title: 'A New Community',
-    summary: 'Help the survivors and assign them jobs.',
-    hint: 'Three survivors walked into your base. Press E near each one to talk, then press E again to pick a job. Supplies appear at your storage crate.',
+    summary: 'Grow to 8 civilians, give them jobs, and collect what they make.',
+    hint: 'Maya, Okoro and Lena walked into your housing; press E to talk to them. Recruit more wanderers with food and beds until you have 8. Press E again near anyone to pick a job. Supplies appear at your storage crate.',
     transmission: 'THREE FIGURES WALK IN FROM THE DARK. NONE OF THEM ARE WEARING HELMETS EITHER.',
     objectives: [
-      { kind: 'talk', label: 'Talk to survivors', count: 3 },
+      { kind: 'talk', label: 'Talk to Maya, Okoro and Lena', count: 3 },
+      { kind: 'civilians', label: 'Civilians in the settlement', count: 8 },
       { kind: 'assign', label: 'Assign jobs', count: 3 },
       { kind: 'supplies', label: 'Collect settlement supplies', count: 1 },
     ],
@@ -187,10 +223,11 @@ export const QUESTS: readonly Quest[] = [
     id: 'act3.into-the-depths',
     act: 3,
     title: 'Into the Depths',
-    summary: 'Craft a power drill, open the hatch, and enter the caves.',
-    hint: 'Build the power drill at your base site with E. Then go to the sealed hatch (purple marker on the map) and press E to drill it open.',
+    summary: 'Forge a titanium pickaxe, craft a power drill, and open the hatch.',
+    hint: 'Titanium ore sometimes drops from surface boulders. Forge the titanium pickaxe (3 titanium, 2 rods, 1 alien alloy) and the power drill at the base site. Then hold the drill at the sealed hatch (purple marker) and press E.',
     transmission: 'THE KNOCKING STOPPED THE MOMENT YOU FINISHED THE DRILL. LIKE IT WAS WAITING.',
     objectives: [
+      { kind: 'build', label: 'Forge a titanium pickaxe', part: 'titanpick' },
       { kind: 'build', label: 'Craft a power drill', part: 'drill' },
       { kind: 'cave', label: 'Reach the caves' },
     ],
@@ -200,7 +237,7 @@ export const QUESTS: readonly Quest[] = [
     act: 3,
     title: 'Buried Resources',
     summary: 'Find 6 glowing ore underground and bring it back to base.',
-    hint: 'Glowing orange ore is scattered through the caves; press E to pick it up. Then climb the ladder and head back to your base.',
+    hint: 'Glowing orange ore is scattered through the caves; press E to pick it up. Mining cave boulders with a better pickaxe shakes more loose. Then climb the ladder and head back to your base.',
     transmission: 'TABLET: ORE SIGNATURE MATCHES... YOUR BLOOD SAMPLE?',
     objectives: [
       { kind: 'collect', label: 'Glowing ore', item: 'rare-ore', count: 6 },
@@ -212,7 +249,7 @@ export const QUESTS: readonly Quest[] = [
     act: 3,
     title: 'Gear Up',
     summary: 'Craft armor plating and a blaster.',
-    hint: 'Both are crafted at the base site with E. Armor cuts the damage you take; the blaster fires with Q or a mouse click.',
+    hint: 'Both are crafted at the base site with E. Armor cuts the damage you take; hold the blaster and fire with Q or a mouse click.',
     transmission: "MAYA: 'SOMEONE WAS WATCHING THE BASE LAST NIGHT. THEY HAD HELMETS ON.'",
     objectives: [
       { kind: 'build', label: 'Craft armor plating', part: 'armor' },
@@ -224,9 +261,18 @@ export const QUESTS: readonly Quest[] = [
     act: 3,
     title: 'First Attack',
     summary: 'Survive the suits.',
-    hint: 'Three figures in spacesuits are hunting you. Fire with Q or a click, and keep moving to dodge their shots.',
+    hint: 'Three figures in spacesuits are hunting you. Hold the blaster, fire with Q or a click, and keep moving to dodge their shots. Blocks make good cover.',
     transmission: 'WARNING: THREE SUITS APPROACHING. THEY ARE ARMED. THEY ARE NOT ANSWERING.',
     objectives: [{ kind: 'defeat', label: 'Suits stopped', count: 3 }],
+  },
+  {
+    id: 'act3.arm-the-survivors',
+    act: 3,
+    title: 'Arm the Survivors',
+    summary: 'Craft gear for the civilians who are left and give it to them.',
+    hint: 'The anvil now crafts survivor gear (glowing ore, metal scrap and iron ore; press R at the anvil to find it). Hold the gear, walk up to a civilian and press E.',
+    transmission: "OKORO: 'WE CAN'T JUST HIDE IN THE HOUSES NEXT TIME. GIVE US SOMETHING TO FIGHT WITH.'",
+    objectives: [{ kind: 'equip', label: 'Civilians given gear', count: 3 }],
   },
   {
     id: 'act3.familiar-faces',
@@ -242,21 +288,148 @@ export const QUESTS: readonly Quest[] = [
     title: 'Defend the Settlement',
     summary: 'Build a defense turret and survive the attack on your base.',
     hint: 'Build the turret at the base site. A wave of suits will then march on the settlement; stop them before they wreck it.',
-    transmission: "OKORO: 'THERE ARE MORE OF THEM. THEY'RE HEADING STRAIGHT FOR US.'",
+    transmission: "LENA: 'THERE ARE MORE OF THEM. THEY'RE HEADING STRAIGHT FOR US.'",
     objectives: [
       { kind: 'build', label: 'Build a defense turret', part: 'turret' },
       { kind: 'wave', label: 'Survive the attack' },
     ],
   },
   {
-    id: 'act2.lunar-tools',
-    act: 2,
+    id: 'act3.hidden-cavern',
+    act: 3,
+    title: 'Hidden Cavern',
+    summary: 'Find the secret cavern deep in the caves.',
+    hint: 'Somewhere far from the ladder, the caves open into a glowing chamber. The A.I. thinks it is far to the south-east of the ladder.',
+    transmission: 'MOONLINK: [SIGNAL CLEAR, FOR ONCE] THERE IS A ROOM DOWN THERE THEY DID NOT WANT EITHER OF US TO FIND.',
+    objectives: [{ kind: 'cavern', label: 'Find the hidden cavern' }],
+  },
+  {
+    id: 'act4.a-way-home',
+    act: 4,
+    title: 'A Way Home',
+    summary: 'Promise the settlement a way off the Moon and pick a launch site.',
+    hint: 'Talk to Maya at the settlement and promise them a way home; she gives you a launch pad kit. Hold it and click somewhere open and flat to start the rocket.',
+    transmission: 'MOONLINK: A ROCKET. GOOD. I WILL HELP. [SIGNAL JAMMED] ...THEY WILL TRY VERY HARD TO STOP IT.',
+    objectives: [
+      { kind: 'promise', label: 'Promise them a way home' },
+      { kind: 'place', label: 'Pick a launch site', item: 'launch-kit', count: 1 },
+    ],
+  },
+  {
+    id: 'act4.blueprints',
+    act: 4,
+    title: 'Blueprints for Escape',
+    summary: 'Find plans for the frame, engine, controls, fuel storage and passenger space.',
+    hint: 'Each plan is somewhere different: ask Okoro about the frame; search the crashed invader dropship for the engine; a terminal deep in the caves has the controls; drill for fuel at the Ice Drill (hold the power drill) for fuel storage; search the Habitat dome for passenger space.',
+    transmission: "OKORO: 'I USED TO BUILD THESE. I THINK. MY HANDS REMEMBER EVEN IF I DON'T.'",
+    objectives: [{ kind: 'blueprints', label: 'Blueprints found', count: 5 }],
+  },
+  {
+    id: 'act4.build-together',
+    act: 4,
+    title: 'Build Together',
+    summary: 'Gather parts and build the first rocket sections.',
+    hint: 'Stand by the rocket and press E to build a section you have the blueprint for; R switches between options. The frame needs rods and titanium; the engine needs glowing ore and alien alloy.',
+    objectives: [{ kind: 'sections', label: 'Rocket sections built', count: 2 }],
+  },
+  {
+    id: 'act4.under-attack',
+    act: 4,
+    title: 'Under Attack',
+    summary: 'Protect the settlement and the rocket during a raid.',
+    hint: 'Suits are marching on the launch pad. Hold the blaster and stop them before they wreck the rocket. Blocks and turrets help.',
+    transmission: 'WARNING: SUITS INBOUND. THEY ARE NOT AIMING AT YOU THIS TIME. THEY ARE AIMING AT THE ROCKET.',
+    objectives: [{ kind: 'raid', label: 'Raids survived', count: 1 }],
+  },
+  {
+    id: 'act4.repair',
+    act: 4,
+    title: 'Repair and Rebuild',
+    summary: 'Fix what the raid damaged and defend the rocket.',
+    hint: 'Damaged buildings and rocket sections smoke. Press E near them to repair with metal scrap. Then build a rocket turret: press E with an open spot in front of you near the pad. Raids will keep coming.',
+    objectives: [
+      { kind: 'repair', label: 'Repairs made', count: 2 },
+      { kind: 'build', label: 'Build a rocket turret', part: 'rocketturret' },
+    ],
+  },
+  {
+    id: 'act4.hard-choice',
+    act: 4,
+    title: 'The Hard Choice',
+    summary: 'Decide who leaves on the rocket.',
+    hint: 'Stand by the rocket and press E. R switches between taking everyone and leaving alone. The choice is final.',
+    transmission: 'MOONLINK: THERE ARE SEATS FOR ONE. OR THERE COULD BE SEATS FOR EVERYONE, IF YOU WAIT. THEY WILL NOT WAIT FOREVER. NEITHER WILL THE SUITS.',
+    objectives: [{ kind: 'choice', label: 'Make your choice' }],
+  },
+  {
+    id: 'act4.leave-no-one',
+    act: 4,
     optional: true,
-    title: 'Lunar Tools',
-    summary: 'Forge a moon pickaxe at your base.',
-    hint: 'With 8 moon rocks, 4 metal scraps and 2 anomaly shards you can forge a moon pickaxe at the base site. It cracks a boulder in two swings and shakes loose extra rock.',
-    transmission: "TABLET: TOOL SCHEMATIC RECOVERED. THE HANDLE IS WRAPPED IN SOMETHING THAT ISN'T CLOTH.",
-    objectives: [{ kind: 'build', label: 'Forge the moon pickaxe', part: 'moonpick' }],
+    title: 'Leave No One Behind',
+    summary: 'Expand passenger capacity and stockpile food.',
+    hint: 'Once the passenger section is built, press E at the rocket to add a passenger bay, then load 10 food into the rocket.',
+    objectives: [
+      { kind: 'bay', label: 'Build a passenger bay' },
+      { kind: 'stock', label: 'Food loaded', count: 10 },
+    ],
+  },
+  {
+    id: 'act5.final-assembly',
+    act: 5,
+    title: 'Final Assembly',
+    summary: 'Finish every rocket section: 100% construction.',
+    hint: 'Press E at the rocket and R to switch sections. Every section needs its blueprint and parts; repair anything the raids damaged.',
+    transmission: 'MOONLINK: LAST STRETCH. I HAVE BEEN COUNTING THE DAYS FOR TEN YEARS. I CAN COUNT A FEW MORE.',
+    objectives: [{ kind: 'sections', label: 'Rocket sections built', count: 5 }],
+  },
+  {
+    id: 'act5.fuel',
+    act: 5,
+    title: 'Fuel for the Journey',
+    summary: 'Mine lunar ice, split it into fuel, and fill the rocket.',
+    hint: 'Water ice hides in permanently shadowed craters: frosty blue floors, light blue on the map. Hold the power drill inside one and press E, or craft an ice rig at the anvil and place it in the crater. Bring the ice to the ice miner at base: with working power it melts the ice and splits the water into hydrogen and oxygen, rocket fuel. Load 12 into the rocket.',
+    transmission: 'MOONLINK: WATER ICE. IN THE DARK CRATERS. MELT IT, SPLIT IT WITH ELECTRICITY: HYDROGEN AND OXYGEN. THE MOON IS A GAS STATION IF YOU ARE PATIENT.',
+    objectives: [
+      { kind: 'place', label: 'Build an ice rig', item: 'rig-kit', count: 1 },
+      { kind: 'fuel', label: 'Fuel loaded', count: 12 },
+    ],
+  },
+  {
+    id: 'act5.preflight',
+    act: 5,
+    title: 'Preflight Check',
+    summary: 'Test power, engines, fuel and the passenger plan.',
+    hint: 'Press E at the rocket to run each check (R switches). Power must be built and undamaged, the engine undamaged, the tank full. If you promised everyone, the passenger plan needs the passenger bay and 10 food loaded.',
+    objectives: [{ kind: 'preflight', label: 'Checks passed', count: 4 }],
+  },
+  {
+    id: 'act5.last-stand',
+    act: 5,
+    title: 'Last Stand',
+    summary: 'Defend the launch site from the final attack and repair the damage.',
+    hint: 'Every suit on the Moon is coming for the rocket. Hold the blaster, use turrets and blocks, then repair whatever they break.',
+    transmission: 'WARNING: MASS SIGNAL. ALL OF THEM. THIS IS THE LAST TIME THEY CAN STOP YOU.',
+    objectives: [
+      { kind: 'laststand', label: 'Survive the final attack' },
+      { kind: 'intact', label: 'Rocket fully repaired' },
+    ],
+  },
+  {
+    id: 'act5.countdown',
+    act: 5,
+    title: 'Countdown',
+    summary: 'Start the launch sequence.',
+    hint: 'Stand by the rocket and press E to begin the launch.',
+    objectives: [{ kind: 'launch', label: 'Begin the launch sequence' }],
+  },
+  {
+    id: 'act5.truth',
+    act: 5,
+    optional: true,
+    title: 'The Truth',
+    summary: 'Find the last pieces of why you can breathe without a suit, and why they hunt you.',
+    hint: 'The lab log in the hidden cavern, the radio dish in the Signal Highlands, and something still running inside the Kestrel.',
+    objectives: [{ kind: 'truth', label: 'Truths uncovered', count: 3 }],
   },
   {
     id: 'act2.moon-survey',
@@ -266,15 +439,6 @@ export const QUESTS: readonly Quest[] = [
     summary: 'Map every region of the Moon.',
     hint: 'There are 6 regions beyond the crash site. The tablet map shows which ones you have found.',
     objectives: [{ kind: 'region', label: 'Regions mapped', count: 6 }],
-  },
-  {
-    id: 'act3.hidden-cavern',
-    act: 3,
-    optional: true,
-    title: 'Hidden Cavern',
-    summary: 'Find the secret cavern deep in the caves.',
-    hint: 'Somewhere far from the ladder, the caves open into a glowing chamber.',
-    objectives: [{ kind: 'cavern', label: 'Find the hidden cavern' }],
   },
 ]
 

@@ -11,10 +11,11 @@ export const CAVE_SPAWN = { x: 0, z: 0 } as const
 export const LADDER: Structure = { kind: 'ladder', name: 'LADDER', x: 9, z: 3, radius: 2.4, mapColor: '#fac775' }
 export const CAVERN: Structure = { kind: 'cavern', name: 'HIDDEN CAVERN', x: 190, z: -150, radius: 3.5, mapColor: '#ff9f5a' }
 export const CAVERN_RANGE = 22
+export const TERMINAL: Structure = { kind: 'terminal', name: 'OLD TERMINAL', x: 70, z: -55, radius: 1.4, mapColor: '#5dcaa5' }
 
 export function createCaveWorld(seed = 23): World {
   const rng = createRng(seed)
-  const structures: Structure[] = [LADDER, CAVERN]
+  const structures: Structure[] = [LADDER, CAVERN, TERMINAL]
   const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(wrap(ax - bx), wrap(az - bz))
   const tooClose = (x: number, z: number, margin: number) =>
     structures.some((s) => dist(x, z, s.x, s.z) < s.radius + margin) || dist(x, z, 0, 0) < 12
@@ -58,6 +59,15 @@ export function createCaveWorld(seed = 23): World {
     const z = Math.sin(a) * r
     if (free(x, z)) pickups.push({ item: 'rare-ore', x, z, phase: rng() * 10, collected: false })
   }
+  for (const [dx, dz] of [[-10, -3], [8, -8], [3, -11]]) pickups.push({ item: 'titanium-ore', x: CAVERN.x + dx, z: CAVERN.z + dz, phase: rng() * 10, collected: false })
+  pickups.push({
+    item: 'data-log',
+    x: CAVERN.x - 5,
+    z: CAVERN.z + 6,
+    phase: 1,
+    collected: false,
+    clue: { id: 'cavern-log', x: CAVERN.x - 5, z: CAVERN.z + 6, text: "LAB LOG: 'THE KESTREL FAULT WAS NOT A FAULT. IT WAS NEVER MEANT TO COME BACK. NEITHER WAS ITS PASSENGER. THE WARDEN A.I. HAS STOPPED REPORTING.'" },
+  })
 
   const pebbles = Array.from({ length: 900 }, () => ({ x: rng() * WORLD_SIZE, z: rng() * WORLD_SIZE }))
   return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens: [], blocks: new BlockGrid() }

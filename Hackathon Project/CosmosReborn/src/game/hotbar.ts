@@ -83,6 +83,63 @@ const ICON_DRAWERS: Partial<Record<ItemId, (g: Ctx) => void>> = {
     rect(g, '#d9dcef', 3, 4, 3, 1)
     rect(g, '#4b5488', 7, 8, 2, 1)
   },
+  'lunar-ice': (g) => {
+    rect(g, '#5b8aa8', 2, 5, 8, 5)
+    rect(g, '#9fd4ff', 3, 3, 6, 5)
+    rect(g, '#e8f6ff', 4, 3, 2, 2)
+    rect(g, '#7fb2ff', 7, 7, 2, 2)
+  },
+  'rig-kit': (g) => {
+    rect(g, '#5b6496', 2, 9, 8, 2)
+    rect(g, '#9aa0b8', 5, 2, 2, 7)
+    rect(g, '#9fd4ff', 4, 1, 4, 2)
+    rect(g, '#fac775', 3, 6, 6, 1)
+  },
+  'launch-kit': (g) => {
+    rect(g, '#5b6496', 1, 8, 10, 3)
+    rect(g, '#fac775', 1, 9, 10, 1)
+    rect(g, '#e6e6ee', 5, 1, 2, 7)
+    rect(g, '#e24b4a', 5, 1, 2, 2)
+  },
+  'rocket-fuel': (g) => {
+    rect(g, '#9aa0b8', 3, 2, 6, 9)
+    rect(g, '#ff9f5a', 3, 5, 6, 4)
+    rect(g, '#ffd28a', 4, 5, 1, 4)
+    rect(g, '#3f4878', 4, 1, 4, 1)
+  },
+  'titan-pickaxe': (g) => {
+    rect(g, '#8a5a1e', 2, 9, 2, 2)
+    rect(g, '#b07f2c', 4, 7, 2, 2)
+    rect(g, '#b07f2c', 6, 5, 2, 2)
+    rect(g, '#5b8aa8', 3, 1, 8, 2)
+    rect(g, '#a9c3d6', 4, 1, 6, 1)
+    rect(g, '#b8f0ff', 9, 2, 2, 2)
+  },
+  'survivor-gear': (g) => {
+    rect(g, '#9aa2cf', 2, 6, 8, 5)
+    rect(g, '#e0884a', 2, 8, 8, 1)
+    ellipse(g, '#e6e6ee', 6, 4, 3, 3)
+    rect(g, '#3b7dd8', 5, 3, 3, 2)
+  },
+  'home-kit': (g) => {
+    rect(g, '#9aa0b8', 1, 9, 10, 2)
+    rect(g, '#e6e6ee', 2, 5, 8, 4)
+    rect(g, '#e0884a', 1, 3, 10, 2)
+    rect(g, '#3f4878', 5, 6, 2, 3)
+  },
+  'farm-kit': (g) => {
+    rect(g, '#5a3f2a', 1, 8, 10, 3)
+    rect(g, '#3fae7c', 2, 4, 1, 4)
+    rect(g, '#7fcf6a', 5, 3, 1, 5)
+    rect(g, '#3fae7c', 8, 4, 1, 4)
+    rect(g, '#ff6b7a', 5, 2, 1, 1)
+  },
+  'alien-alloy': (g) => {
+    rect(g, '#5b8aa8', 2, 5, 8, 4)
+    rect(g, '#b8f0ff', 3, 4, 7, 2)
+    rect(g, '#ffffff', 4, 4, 2, 1)
+    rect(g, '#2f5f7a', 2, 9, 8, 1)
+  },
   'rocket-part': (g) => {
     rect(g, '#9aa0b8', 1, 7, 10, 3)
     rect(g, '#d4a43c', 2, 4, 7, 3)

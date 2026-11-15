@@ -1,5 +1,6 @@
 import { ANOMALIES, HATCH } from './anomalies'
 import { BASE_CENTER } from './base'
+import { REGIONS, regionAt } from './regions'
 import { SCREEN_H, SCREEN_W, WORLD_SIZE } from './constants'
 import { clamp, easeOutBack, wrap, wrapPositive } from './math'
 import { ellipse, makeSprite, rect, type Ctx } from './pixel'
@@ -49,6 +50,14 @@ export interface TabletView {
   heading: number
   tracker: QuestTracker
   underground: boolean
+  lifeSigns: LifeSign[]
+}
+
+export interface LifeSign {
+  x: number
+  z: number
+  label: string
+  color: string
 }
 
 export class Tablet {
@@ -59,6 +68,8 @@ export class Tablet {
   private selected = 0
   private appTime = 0
   private mapTexture: HTMLCanvasElement | null = null
+  private fogTexture: HTMLCanvasElement | null = null
+  private fogKey = ''
   private tileRects: { x: number; y: number; w: number; h: number }[] = []
 
   get visible(): boolean {
@@ -188,7 +199,22 @@ export class Tablet {
       ellipse(ctx, '#0b1830', cx, cy, 13, 13)
       const a = time * 2
       for (let r = 0; r < 40; r++) rect(ctx, '#e0884a', cx + Math.cos(a) * r, cy + Math.sin(a) * r, 1, 1)
-      if (Math.sin(time * 2.3) > 0.4) rect(ctx, '#ff8a7a', cx + 18, cy - 22, 2, 2)
+      rect(ctx, '#ffffff', cx - 1, cy - 1, 2, 2)
+      for (const sign of view.lifeSigns) {
+        const dx = wrap(sign.x - view.playerX)
+        const dz = wrap(sign.z - view.playerZ)
+        const fwd = dx * Math.sin(view.heading) + dz * Math.cos(view.heading)
+        const side = dx * Math.cos(view.heading) - dz * Math.sin(view.heading)
+        const scale = 38 / 260
+        let bx = side * scale
+        let by = -fwd * scale
+        const len = Math.hypot(bx, by)
+        if (len > 38) {
+          bx = (bx / len) * 38
+          by = (by / len) * 38
+        }
+        if (Math.floor(time * 3 + sign.x) % 3 !== 0) rect(ctx, sign.color, cx + bx - 1, cy + by - 1, 3, 3)
+      }
     }
   }
 
@@ -223,15 +249,38 @@ export class Tablet {
     if (this.screen === 'map') this.drawMapText(text, SX, SY, view)
     else if (this.screen === 'quests') this.drawQuests(text, SX, SY, SW, view.tracker)
     else if (this.screen === 'scan') {
-      text.text('LIFE SIGNS: 0', SX + 8, SY + 16, '#e0884a', { size: 5.5 })
-      if (Math.sin(time * 2.3) > 0.4) text.text('LIFE SIGNS: 1?', SX + 8, SY + 24, '#ff8a7a', { size: 5.5 })
-      text.text('SCANNER CALIBRATION REQUIRED', SX + SW / 2, SY + SH - 10, '#5a63a0', { size: 4.8, align: 'center' })
+      const signs = [...view.lifeSigns]
+        .map((s) => ({ ...s, d: Math.hypot(wrap(s.x - view.playerX), wrap(s.z - view.playerZ)) }))
+        .sort((a, b) => a.d - b.d)
+      text.text(`LIFE SIGNS: ${signs.length}`, SX + 8, SY + 16, '#e0884a', { size: 5.5 })
+      signs.slice(0, 6).forEach((s, i) => {
+        text.text(s.label, SX + 8, SY + 26 + i * 8, s.color, { size: 4.8 })
+        text.text(`${Math.round(s.d)}m`, SX + 54, SY + 26 + i * 8, '#9aa2cf', { size: 4.8 })
+      })
+      text.text('UP = THE WAY YOU FACE', SX + SW / 2, SY + SH - 10, '#5a63a0', { size: 4.8, align: 'center' })
     }
   }
 
   private launch(app: App): void {
     this.screen = app
     this.appTime = 0
+  }
+
+  private ensureFog(known: readonly string[]): HTMLCanvasElement {
+    const key = known.join(',')
+    if (this.fogTexture && key === this.fogKey) return this.fogTexture
+    this.fogKey = key
+    const step = 2
+    this.fogTexture = makeSprite(MAP_TEX, MAP_TEX, (g) => {
+      for (let py = 0; py < MAP_TEX; py += step) {
+        for (let px = 0; px < MAP_TEX; px += step) {
+          const region = regionAt(px / MAP_PX_PER_UNIT, (MAP_TEX - py) / MAP_PX_PER_UNIT)
+          if (region.home || known.includes(region.id)) continue
+          rect(g, (px + py) % 4 === 0 ? '#14223e' : '#0b1830', px, py, step, step)
+        }
+      }
+    })
+    return this.fogTexture
   }
 
   private ensureMap(world: World): HTMLCanvasElement {
@@ -248,7 +297,7 @@ export class Tablet {
         const x = wrapPositive(c.x) * MAP_PX_PER_UNIT
         const y = MAP_TEX - wrapPositive(c.z) * MAP_PX_PER_UNIT
         ellipse(g, '#9aa2cf', x, y - 0.5, r + 0.5, r + 0.5)
-        ellipse(g, c.isPit ? '#353d6c' : '#4b5488', x, y, r, r)
+        ellipse(g, c.ice ? '#9fd4ff' : c.isPit ? '#353d6c' : '#4b5488', x, y, r, r)
       }
       for (const b of world.boulders) {
         rect(g, '#aab1d6', wrapPositive(b.x) * MAP_PX_PER_UNIT, MAP_TEX - wrapPositive(b.z) * MAP_PX_PER_UNIT, 1, 1)
@@ -290,6 +339,10 @@ export class Tablet {
     ctx.clip()
     for (const dx of [-MAP_TEX, 0, MAP_TEX]) {
       for (const dy of [-MAP_TEX, 0, MAP_TEX]) ctx.drawImage(tex, Math.round(mx - ox + dx), Math.round(my - oy + dy))
+    }
+    const fog = this.ensureFog(view.tracker.regions)
+    for (const dx of [-MAP_TEX, 0, MAP_TEX]) {
+      for (const dy of [-MAP_TEX, 0, MAP_TEX]) ctx.drawImage(fog, Math.round(mx - ox + dx), Math.round(my - oy + dy))
     }
 
     const [bx, by] = this.toMap(view, BASE_CENTER.x, BASE_CENTER.z, SX, SY)
@@ -340,6 +393,11 @@ export class Tablet {
       return
     }
     text.text('N', mx + MAP_SIZE / 2, my + 1, '#ff8a7a', { size: 5, align: 'center' })
+    for (const r of REGIONS) {
+      if (r.home || view.tracker.regions.includes(r.id)) continue
+      const [x, y] = this.toMap(view, r.x, r.z, SX, SY)
+      if (x > mx + 4 && x < mx + MAP_SIZE - 4 && y > my + 4 && y < my + MAP_SIZE - 4) text.text('UNMAPPED', x, y - 2, '#3f4878', { size: 4, align: 'center' })
+    }
     for (const s of view.world.structures) {
       if (!s.discoverable || this.isKnown(view, s.name, s.kind)) continue
       const [x, y] = this.toMap(view, s.x, s.z, SX, SY)

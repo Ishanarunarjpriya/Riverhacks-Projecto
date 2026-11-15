@@ -13,6 +13,8 @@ export interface Crater {
   r: number
   isPit: boolean
   depth: number
+  ice?: boolean
+  iceLeft?: number
 }
 
 export interface Boulder {
@@ -68,6 +70,18 @@ export function createWorld(seed = 11): World {
     if (craters.some((c) => dist(x, z, c.x, c.z) < (c.r + r) * 1.25 + 2)) continue
     const isPit = r >= MIN_PIT_RADIUS
     craters.push({ x, z, r, isPit, depth: isPit ? Math.min(MAX_PIT_DEPTH, 1.2 + r * 0.3) : r * 0.3 })
+  }
+
+  const icy = craters
+    .filter((c) => c.isPit && c.r >= 5 && Math.hypot(wrap(c.x), wrap(c.z)) > 110)
+    .sort((a, b) => b.r - a.r)
+  const chosen: Crater[] = []
+  for (const c of icy) {
+    if (chosen.length >= 8) break
+    if (chosen.some((o) => dist(o.x, o.z, c.x, c.z) < 120)) continue
+    c.ice = true
+    c.iceLeft = 8
+    chosen.push(c)
   }
 
   const pebbles: Pebble[] = []
@@ -138,7 +152,9 @@ export function groundHeightAt(world: World, x: number, z: number): number {
   const crater = craterAt(world, x, z)
   const base = crater ? craterHeight(crater, x, z) : 0
   const boulder = boulderAt(world, x, z, 0.5)
-  return Math.max(boulder ? Math.max(base, boulder.height) : base, world.blocks.heightAt(x, z, 0.4))
+  const ground = boulder ? Math.max(base, boulder.height) : base
+  const blocks = world.blocks.heightAt(x, z, 0.4)
+  return blocks > 0 ? Math.max(ground, blocks) : ground
 }
 
 export function walkBlocked(world: World, x: number, z: number): boolean {

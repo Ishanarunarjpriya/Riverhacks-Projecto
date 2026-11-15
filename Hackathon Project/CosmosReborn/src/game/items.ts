@@ -24,6 +24,15 @@ export type ItemId =
   | 'crescent-shard'
   | 'ice-miner'
   | 'anvil'
+  | 'home-kit'
+  | 'farm-kit'
+  | 'alien-alloy'
+  | 'titan-pickaxe'
+  | 'launch-kit'
+  | 'lunar-ice'
+  | 'rig-kit'
+  | 'rocket-fuel'
+  | 'survivor-gear'
 
 export interface ItemInfo {
   name: string
@@ -57,6 +66,15 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   'crescent-shard': { name: 'CRESCENT SHARD', short: 'CRESCENT', color: '#9fe1cb', description: 'A curved crystal that grows in the dust. Used for building.' },
   'ice-miner': { name: 'ICE MINER', short: 'MINER', color: '#5dcaa5', description: 'A mineral press from the Kestrel. Set it up at the base site.' },
   'anvil': { name: 'ANVIL', short: 'ANVIL', color: '#7c85b4', description: 'Heavy. Very heavy. Set it up at the base site to forge tools.' },
+  'home-kit': { name: 'HOME KIT', short: 'HOME', color: '#e6e6ee', description: 'Hold it and click to place a home. Each home has 2 beds.' },
+  'farm-kit': { name: 'FARM KIT', short: 'FARM', color: '#7fcf6a', description: 'Hold it and click to plant a farm. It grows moon food.' },
+  'lunar-ice': { name: 'LUNAR ICE', short: 'ICE', color: '#9fd4ff', description: 'Frozen water from a crater that has not seen sunlight in billions of years.' },
+  'rig-kit': { name: 'ICE RIG KIT', short: 'RIG', color: '#9fd4ff', description: 'Place it inside an icy crater. It slowly drills out ice for you.' },
+  'launch-kit': { name: 'LAUNCH PAD KIT', short: 'PAD', color: '#fac775', description: 'Hold it and click where the rocket should be built. Pick somewhere open.' },
+  'rocket-fuel': { name: 'ROCKET FUEL', short: 'FUEL', color: '#ff9f5a', description: 'Drilled out of frozen ground. Smells like a storm.' },
+  'titan-pickaxe': { name: 'TITANIUM PICKAXE', short: 'TI PICK', color: '#a9c3d6', description: 'Lunar titanium and alien alloy. Cracks a boulder in one swing.' },
+  'survivor-gear': { name: 'SURVIVOR GEAR', short: 'GEAR', color: '#ff9f5a', description: 'Armor and a helmet for a civilian. Hold it near one and press E.' },
+  'alien-alloy': { name: 'ALIEN ALLOY', short: 'ALLOY', color: '#b8f0ff', description: 'Torn from the alien. Light, cold and impossibly strong.' },
   'titanium-ore': { name: 'TITANIUM ORE', short: 'TITANIUM', color: '#a9c3d6', description: 'Rare, light and strong. Sometimes drops from boulders.' },
 }
 

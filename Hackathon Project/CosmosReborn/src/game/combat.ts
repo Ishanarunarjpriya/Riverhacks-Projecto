@@ -151,7 +151,7 @@ export function updateProjectiles(projectiles: Projectile[], dt: number, enemies
     p.z += p.vz * dt
     p.life -= dt
     if (p.life <= 0) continue
-    if (!p.pierce && (isSolidAt(world, p.x, p.z) || (boulderAt(world, p.x, p.z)?.height ?? -1) > p.y || world.blocks.heightAt(p.x, p.z) > p.y)) {
+    if (!p.pierce && (isSolidAt(world, p.x, p.z) || (boulderAt(world, p.x, p.z)?.height ?? -Infinity) > p.y || (world.blocks.heightAt(p.x, p.z) || -Infinity) > p.y)) {
       p.life = 0
       onHit(p, { enemy: null, player: false, wall: true })
       continue

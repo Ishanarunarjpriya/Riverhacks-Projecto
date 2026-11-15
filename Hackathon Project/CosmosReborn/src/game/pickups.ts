@@ -69,6 +69,8 @@ export function createPickups(
   anywhere('metal-scrap', 8)
 
   anywhere('iron-ore', 10)
+  anywhere('moon-berry', 6)
+  anywhere('glow-cap', 2)
   anywhere('titanium-ore', 4)
 
   for (const clue of CLUES) place('data-log', clue.x, clue.z, clue)

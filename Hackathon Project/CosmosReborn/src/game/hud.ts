@@ -22,6 +22,7 @@ export interface CombatHud {
   armor: boolean
   blaster: boolean
   integrity: number | null
+  attackLabel?: string
   dead: boolean
   underground: boolean
 }
@@ -141,11 +142,13 @@ function drawCompass(ctx: Ctx, text: TextLayer, world: World, player: Player, tr
       nearest = s
     }
   }
-  const label = `${nearest.name} ${Math.max(0, Math.round(nearestDist - nearest.radius))}m`
-  const lw = text.measure(label, { size: 5.5 }) + 8
-  ctx.fillStyle = PANEL
-  ctx.fillRect(SCREEN_W - 4 - lw, Y + H + 2, lw, 9)
-  text.text(label, SCREEN_W - 8, Y + H + 3.5, '#fac775', { size: 5.5, align: 'right' })
+  if (nearest) {
+    const label = `${nearest.name} ${Math.max(0, Math.round(nearestDist - nearest.radius))}m`
+    const lw = text.measure(label, { size: 5.5 }) + 8
+    ctx.fillStyle = PANEL
+    ctx.fillRect(SCREEN_W - 4 - lw, Y + H + 2, lw, 9)
+    text.text(label, SCREEN_W - 8, Y + H + 3.5, '#fac775', { size: 5.5, align: 'right' })
+  }
   const region = tracker.currentRegion
   const rw = text.measure(region, { size: 5 }) + 8
   ctx.fillStyle = PANEL
@@ -177,7 +180,7 @@ function drawCombat(ctx: Ctx, text: TextLayer, c: CombatHud, time: number): void
     ctx.fillRect(bx, by, w, 15)
     rect(ctx, '#2a1a2a', bx + 4, by + 9, w - 8, 3)
     rect(ctx, c.integrity < 30 ? '#e24b4a' : '#fac775', bx + 4, by + 9, ((w - 8) * Math.max(0, c.integrity)) / 100, 3)
-    text.text('SETTLEMENT UNDER ATTACK', bx + w / 2, by + 1.5, '#ff8a7a', { size: 5, align: 'center' })
+    text.text(c.attackLabel ?? 'SETTLEMENT UNDER ATTACK', bx + w / 2, by + 1.5, '#ff8a7a', { size: 5, align: 'center' })
   }
   if (c.dead) text.text('YOU BLACKED OUT', SCREEN_CX, 80, '#ff8a7a', { size: 10, align: 'center' })
 }

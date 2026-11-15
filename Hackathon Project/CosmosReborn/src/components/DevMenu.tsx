@@ -72,6 +72,8 @@ export default function DevMenu({ game, onClose }: Props) {
         <Button label="Skip cutscene" onClick={act('Cutscene skipped', () => game.devSkipCutscene())} />
         <Button label="Jump to Act II" onClick={act('Jumped to Act II', () => game.devJumpToAct(2))} />
         <Button label="Jump to Act III" onClick={act('Jumped to Act III', () => game.devJumpToAct(3))} />
+        <Button label="Jump to Act IV" onClick={act('Jumped to Act IV', () => game.devJumpToAct(4))} />
+        <Button label="Jump to Act V" onClick={act('Jumped to Act V', () => game.devJumpToAct(5))} />
         <Button label="Finish everything" onClick={act('Jumped to the end', () => game.devJumpToAct(99))} />
         <Button label="Reveal map" onClick={act('Map revealed', () => game.devRevealAll())} />
       </Section>
@@ -90,6 +92,22 @@ export default function DevMenu({ game, onClose }: Props) {
         <Button label="Give resources" onClick={act('Resources added', () => game.devGiveResources())} />
         <Button label="Give all gear" onClick={act('Gear added', () => game.devGiveGear())} />
         <Button label="Give food & ores" onClick={act('Food & ores added', () => game.devGiveFood())} />
+      </Section>
+
+      <Section title="Act IV">
+        <Button label="All blueprints" onClick={act('Blueprints', () => game.devAllBlueprints())} />
+        <Button label="Start rocket raid" onClick={act('Raid', () => game.devStartRaid())} />
+      </Section>
+
+      <Section title="Act V">
+        <Button label="Give lunar ice + rig" onClick={act('Ice', () => game.devGiveIce())} />
+        <Button label="Play Ending A" onClick={act('Ending', () => game.devPlayEnding('together'))} />
+        <Button label="Play Ending B" onClick={act('Ending', () => game.devPlayEnding('captured'))} />
+      </Section>
+
+      <Section title="Bosses">
+        <Button label="Fight Drift Mother" onClick={act('Boss', () => game.devStartBoss('jelly'))} />
+        <Button label="Fight the Watcher" onClick={act('Boss', () => game.devStartBoss('alien'))} />
       </Section>
 
       <Section title="Gardens">

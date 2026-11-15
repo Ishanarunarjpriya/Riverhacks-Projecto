@@ -3,6 +3,7 @@ import { ITEMS, type ItemId } from './items'
 import { wrap } from './math'
 import { ACT_TITLES, QUESTS, SHIP_SPOT, type Objective, type Quest } from './quests'
 import { ANOMALIES } from './anomalies'
+import { BLUEPRINTS, FOOD_STOCK_GOAL, FUEL_GOAL, rocket, rocketProgress, type Blueprint } from './rocket'
 import { REGIONS, type Region } from './regions'
 import { STRUCTURES } from './structures'
 import type { Job } from './survivors'
@@ -93,6 +94,20 @@ export class QuestTracker {
   shipEntered = false
   searched: string[] = []
   blocksPlaced = 0
+  placed: Partial<Record<ItemId, number>> = {}
+  recruited: string[] = []
+  bosses: string[] = []
+  equipped: string[] = []
+  promised = false
+  blueprints: Blueprint[] = []
+  raids = 0
+  repairs = 0
+  choice: 'everyone' | 'alone' | null = null
+  preflight: string[] = []
+  finalRaidWon = false
+  launched = false
+  truths: string[] = []
+  lost: string[] = []
   clues: string[] = []
   completed: string[] = []
   messages: Message[] = []
@@ -145,7 +160,11 @@ export class QuestTracker {
     this.anomalies.push(id)
     this.toast(text, '#c9a6ff')
     this.collect('anomaly-shard', 2)
-    if (this.anomalies.length >= 2 && !this.signalRevealed) {
+    if (this.anomalies.length >= 2) this.revealSignal()
+  }
+
+  revealSignal(): void {
+    if (!this.signalRevealed) {
       this.signalRevealed = true
       this.say('transmission', 'STRANGE SIGNAL DETECTED', 'THE SHARDS ARE RESONATING. SOURCE: BELOW THE SURFACE. FOLLOW THE PURPLE MARKER.', '#c9a6ff', 1.5)
       this.pendingSounds.push({ sound: 'clue', at: this.time + 1.5 })
@@ -162,6 +181,7 @@ export class QuestTracker {
 
   talkTo(name: string, line: string): void {
     if (!this.talked.includes(name)) this.talked.push(name)
+    if (!this.recruited.includes(name)) this.recruited.push(name)
     this.toast(`${name}: "${line}"`, '#fac775')
     this.sounds.push('inspect')
     this.check()
@@ -287,6 +307,150 @@ export class QuestTracker {
     this.check()
   }
 
+  placeKit(item: ItemId): void {
+    this.placed[item] = (this.placed[item] ?? 0) + 1
+    this.sounds.push('build')
+    this.check()
+  }
+
+  recruit(name: string, line: string): void {
+    if (this.recruited.includes(name)) return
+    this.recruited.push(name)
+    this.toast(`${name}: "${line}"`, '#fac775')
+    this.say('complete', 'NEW CIVILIAN', `${name} JOINS THE SETTLEMENT`, '#9fe1cb')
+    this.sounds.push('discover')
+    this.check()
+  }
+
+  bossIntro(name: string, intro: string): void {
+    this.say('transmission', name, intro, '#c9a6ff', 0.6)
+    this.sounds.push('clue')
+  }
+
+  promise(): void {
+    if (this.promised) return
+    this.promised = true
+    this.say('transmission', 'MAYA', "'THEN WE BUILD IT TOGETHER. ALL OF US. YOU PROMISED.' SHE HANDS YOU A LAUNCH PAD KIT.", '#fac775', 0.4)
+    this.add('launch-kit', 1)
+    this.sounds.push('quest')
+    this.check()
+  }
+
+  findBlueprint(id: Blueprint): void {
+    if (this.blueprints.includes(id)) return
+    this.blueprints.push(id)
+    this.say('complete', 'BLUEPRINT FOUND', BLUEPRINTS[id].name, '#9fe1ff')
+    this.sounds.push('discover')
+    this.check()
+  }
+
+  sectionBuilt(): void {
+    this.sounds.push('build')
+    this.check()
+  }
+
+  surviveRaid(): void {
+    this.raids++
+    this.say('complete', 'RAID REPELLED', 'THE ROCKET STILL STANDS', '#fac775')
+    this.sounds.push('complete')
+    this.check()
+  }
+
+  repair(name: string): void {
+    this.repairs++
+    this.toast(`REPAIRED ${name}`, '#9fe1cb')
+    this.sounds.push('build')
+    this.check()
+  }
+
+  makeChoice(choice: 'everyone' | 'alone'): void {
+    if (this.choice) return
+    this.choice = choice
+    if (choice === 'everyone') this.say('transmission', 'THE HARD CHOICE', "YOU TELL THEM: EVERYONE GOES. LENA CRIES. OKORO STARTS MEASURING SEATS. MOONLINK SAYS NOTHING, BUT THE SIGNAL CLEARS FOR A SECOND.", '#9fe1cb', 0.4)
+    else this.say('transmission', 'THE HARD CHOICE', "YOU DECIDE TO LEAVE ALONE. YOU DO NOT TELL THEM. MAYA IS WATCHING YOU FROM THE DOORWAY. SHE ALREADY KNOWS.", '#ff8a7a', 0.4)
+    this.sounds.push('clue')
+    this.check()
+  }
+
+  passCheck(id: string, text: string): void {
+    if (this.preflight.includes(id)) return
+    this.preflight.push(id)
+    this.toast(text, '#9fe1cb')
+    this.sounds.push('select')
+    this.check()
+  }
+
+  winLastStand(): void {
+    if (this.finalRaidWon) return
+    this.finalRaidWon = true
+    this.say('complete', 'THE LAST STAND', 'THE LAUNCH SITE HOLDS', '#fac775')
+    this.sounds.push('complete')
+    this.check()
+  }
+
+  launch(): void {
+    this.launched = true
+    this.check()
+  }
+
+  findTruth(id: string, text: string): void {
+    if (this.truths.includes(id)) return
+    this.truths.push(id)
+    this.say('transmission', 'THE TRUTH', text, '#c9a6ff', 0.3)
+    this.sounds.push('clue')
+    this.check()
+  }
+
+  truthCount(): number {
+    return this.truths.length + (this.clues.includes('cavern-log') ? 1 : 0)
+  }
+
+  rewindToChoice(): void {
+    const idx = this.mainQuests.findIndex((q) => q.id === 'act4.hard-choice')
+    if (idx < 0) return
+    const drop = new Set(this.mainQuests.slice(idx).map((q) => q.id))
+    this.completed = this.completed.filter((id) => !drop.has(id))
+    this.mainIndex = idx
+    this.choice = null
+    this.preflight = []
+    this.finalRaidWon = false
+    this.launched = false
+    this.messages = []
+    this.pendingSounds = []
+    this.say('act', 'BEFORE THE CHOICE', 'THIS TIME, THINK OF THEM', '#c9a6ff', 0.3)
+    const quest = this.activeQuest
+    if (quest) this.announce(quest, 3)
+  }
+
+  refreshRocket(): void {
+    this.check()
+  }
+
+  equipCivilian(name: string): void {
+    if (this.equipped.includes(name)) return
+    this.equipped.push(name)
+    this.toast(`${name} SUITS UP`, '#ff9f5a')
+    this.sounds.push('build')
+    this.check()
+  }
+
+  loseCivilians(names: string[]): void {
+    if (names.length === 0) return
+    this.lost.push(...names)
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} AND ${names[names.length - 1]}`
+    this.say('transmission', 'THE SETTLEMENT', `WHILE YOU FOUGHT, MORE SUITS HIT THE HOUSES. ${list} ${names.length === 1 ? 'IS' : 'ARE'} GONE. THEY TOOK THEM, NOT KILLED THEM. THEY ONLY TOOK THE ONES WITHOUT HELMETS.`, '#ff8a7a', 2.6)
+    this.pendingSounds.push({ sound: 'clue', at: this.time + 2.6 })
+  }
+
+  beatBoss(id: string, name: string, outro: string): void {
+    if (this.bosses.includes(id)) return
+    this.bosses.push(id)
+    this.say('complete', 'GUARDIAN DEFEATED', name, '#c9a6ff')
+    this.say('transmission', name, outro, '#c9a6ff', 1.2)
+    this.sounds.push('complete')
+    this.check()
+  }
+
   placeBlock(): void {
     this.blocksPlaced++
     this.check()
@@ -333,6 +497,7 @@ export class QuestTracker {
     if (this.cavernFound) return
     this.cavernFound = true
     this.say('complete', 'HIDDEN CAVERN', 'A GLOWING CHAMBER', '#ff9f5a')
+    this.say('transmission', 'MOONLINK', 'ROWS OF EMPTY BEDS. EACH ONE HAS A NAME TAG. THE LAST TAG IS BLANK. IT IS THE SAME SIZE AS YOURS. THERE IS A LOG ON THE FLOOR.', '#5dcaa5', 2.5)
     this.sounds.push('discover')
     this.check()
   }
@@ -350,7 +515,8 @@ export class QuestTracker {
   }
 
   /** 0 = bare hands, 1 = pickaxe, 2 = moon pickaxe. */
-  toolTier(): 0 | 1 | 2 {
+  toolTier(): 0 | 1 | 2 | 3 {
+    if (this.count('titan-pickaxe') > 0) return 3
     if (this.count('moon-pickaxe') > 0) return 2
     if (this.count('pickaxe') > 0) return 1
     return 0
@@ -428,9 +594,9 @@ export class QuestTracker {
       basePartsBuilt: [...this.baseParts],
       cluesFound: [...this.clues],
       creatureScans: [...this.scans],
-      rocketProgress: 0,
-      enemyWavesSurvived: 0,
-      act4Choice: null,
+      rocketProgress: rocketProgress(),
+      enemyWavesSurvived: this.raids + (this.waveSurvived ? 1 : 0),
+      act4Choice: this.choice,
     }
   }
 
@@ -563,6 +729,65 @@ export class QuestTracker {
       case 'ship':
         this.shipEntered = true
         break
+      case 'place':
+        this.placed[o.item] = Math.max(this.placed[o.item] ?? 0, o.count)
+        break
+      case 'civilians':
+        fill(this.recruited, ['TOMAS', 'ADA', 'RIN', 'SOL', 'IVY', 'BRAM', 'NOOR', 'MAYA'], o.count)
+        break
+      case 'promise':
+        if (!this.promised) {
+          this.promised = true
+          this.add('launch-kit', 1)
+        }
+        break
+      case 'blueprints':
+        for (const id of Object.keys(BLUEPRINTS) as Blueprint[]) if (!this.blueprints.includes(id)) this.blueprints.push(id)
+        break
+      case 'sections':
+        for (const id of (o.count >= 5 ? Object.keys(BLUEPRINTS) : ['frame', 'engine']) as Blueprint[]) rocket.built.add(id)
+        break
+      case 'raid':
+        this.raids = Math.max(this.raids, o.count)
+        break
+      case 'repair':
+        this.repairs = Math.max(this.repairs, o.count)
+        break
+      case 'choice':
+        this.choice = this.choice ?? 'everyone'
+        break
+      case 'bay':
+        rocket.bay = true
+        break
+      case 'stock':
+        rocket.food = Math.max(rocket.food, o.count)
+        break
+      case 'fuel':
+        rocket.fuel = Math.max(rocket.fuel, o.count)
+        break
+      case 'preflight':
+        for (const id of ['power', 'engines', 'fuel', 'passengers']) if (!this.preflight.includes(id)) this.preflight.push(id)
+        break
+      case 'laststand':
+        this.finalRaidWon = true
+        break
+      case 'intact':
+        this.finalRaidWon = true
+        rocket.damaged.clear()
+        break
+      case 'launch':
+        this.launched = true
+        break
+      case 'truth':
+        for (const id of ['dish', 'core', 'extra']) if (this.truthCount() < o.count && !this.truths.includes(id)) this.truths.push(id)
+        break
+      case 'equip':
+        fill(this.equipped, ['MAYA', 'OKORO', 'LENA'], o.count)
+        break
+      case 'boss':
+        fill(this.bosses, ANOMALIES.map((a) => a.id), o.count)
+        this.signalRevealed = this.signalRevealed || this.bosses.length >= 2
+        break
       case 'blocks':
         this.blocksPlaced = Math.max(this.blocksPlaced, o.count)
         break
@@ -627,6 +852,42 @@ export class QuestTracker {
         return [this.searched.length, o.count]
       case 'blocks':
         return [this.blocksPlaced, o.count]
+      case 'place':
+        return [this.placed[o.item] ?? 0, o.count]
+      case 'civilians':
+        return [this.recruited.length, o.count]
+      case 'boss':
+        return [this.bosses.length, o.count]
+      case 'equip':
+        return [this.equipped.length, o.count]
+      case 'promise':
+        return [this.promised ? 1 : 0, 1]
+      case 'blueprints':
+        return [this.blueprints.length, o.count]
+      case 'sections':
+        return [rocket.built.size, o.count]
+      case 'raid':
+        return [this.raids, o.count]
+      case 'repair':
+        return [this.repairs, o.count]
+      case 'choice':
+        return [this.choice ? 1 : 0, 1]
+      case 'bay':
+        return [rocket.bay ? 1 : 0, 1]
+      case 'stock':
+        return [Math.min(rocket.food, FOOD_STOCK_GOAL), o.count]
+      case 'fuel':
+        return [Math.min(rocket.fuel, FUEL_GOAL), o.count]
+      case 'preflight':
+        return [this.preflight.length, o.count]
+      case 'laststand':
+        return [this.finalRaidWon ? 1 : 0, 1]
+      case 'intact':
+        return [this.finalRaidWon && rocket.damaged.size === 0 ? 1 : 0, 1]
+      case 'launch':
+        return [this.launched ? 1 : 0, 1]
+      case 'truth':
+        return [this.truthCount(), o.count]
     }
   }
 

@@ -1,10 +1,10 @@
 import { ANOMALIES, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
 import { setAssistantContext } from './assistant'
 import { GameAudio, type SoundName } from './audio'
-import { BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
+import { ANVIL_RECIPES, BEDS_PER_HOME, HOUSING_BEDS, KIT_STRUCTURES, BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
 import { BLOCK, BLOCK_FOR_ITEM, BLOCK_INFO, BLOCK_REACH, MAX_STACK, cellCenter, cellOf, columnModel, ghostModel, type BlockColumn } from './blocks'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
-import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
+import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, TERMINAL, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
 import {
   ARMOR_REDUCTION,
   BLASTER_COOLDOWN,
@@ -26,9 +26,12 @@ import {
 } from './combat'
 import { HORIZON_D, SCREEN_H, SCREEN_W, SHOW_MINIMAP } from './constants'
 import { drawCrater } from './crater'
-import { GARDEN_FIND_RANGE, GARDEN_FOOD, GARDEN_REGROW, drawPlant, growCrop, makeGarden, type Garden, type Plant } from './garden'
+import { FARM_FOOD, FARM_REGROW, makeFarm, GARDEN_FIND_RANGE, GARDEN_FOOD, GARDEN_REGROW, drawPlant, growCrop, makeGarden, type Garden, type Plant } from './garden'
 import { SCAN_RANGE, createCreatures, drawCreature, speciesNote, updateCreatures, type Creature } from './creatures'
 import { Cutscene } from './cutscene'
+import { Finale } from './finale'
+import { FUEL_GOAL, RIG_CAPACITY, RIG_INTERVAL, BLUEPRINTS, FOOD_STOCK_GOAL, PASSENGER_BAY_COST, RAID_INTERVAL, ROCKET_RANGE, SECTION_COST, SECTION_ORDER, rocket, type Blueprint } from './rocket'
+import { ARENA_SPAWN, BOSS_INFO, MELEE_RANGE, bossVulnerable, clampToArena, createArenaWorld, createBoss, drawBoss, updateBoss, type Boss } from './boss'
 import { SHIP_SPAWN, SHIP_WORKBENCH, WRECKAGE, clampToShip, createShipWorld, drawShipCeiling, drawShipLight, SHIP_GROUND } from './ship'
 import { Hotbar, HOTBAR_SLOTS, type HotbarItem } from './hotbar'
 import { drawHud, type Prompt } from './hud'
@@ -48,6 +51,7 @@ import {
   JOB_OUTPUT,
   PRODUCTION_INTERVAL,
   TALK_RANGE,
+  createStrays,
   createSurvivors,
   drawSurvivor,
   nextJob,
@@ -63,7 +67,7 @@ type Decal =
   | { kind: 'pebble'; p: ScreenPoint; depth: number }
   | { kind: 'shadow'; pos: CamPos; radius: number; depth: number }
   | { kind: 'pad'; depth: number }
-  | { kind: 'garden'; pos: CamPos; radius: number; depth: number }
+  | { kind: 'garden'; pos: CamPos; radius: number; depth: number; farm: boolean }
   | { kind: 'plot'; pos: CamPos; radius: number; depth: number }
 
 type Upright =
@@ -79,6 +83,7 @@ type Upright =
   | { kind: 'plant'; plant: Plant; p: ScreenPoint }
   | { kind: 'blocks'; col: BlockColumn; x: number; z: number; p: ScreenPoint }
   | { kind: 'ghost'; target: BlockTarget; p: ScreenPoint }
+  | { kind: 'boss'; boss: Boss; p: ScreenPoint }
 
 interface BlockTarget {
   gx: number
@@ -107,7 +112,7 @@ export interface DevLocation {
   id: string
   label: string
   group: string
-  scene: 'surface' | 'cave' | 'ship'
+  scene: 'surface' | 'cave' | 'ship' | 'arena'
   x: number
   z: number
   face: number
@@ -154,10 +159,11 @@ const INSPECT_RANGE = 5
 const SHIP_LANDING = { x: 0, z: 47 } as const
 const MINE_RANGE = 2.2
 const SUIT_CLUES = [
-  "THE NAME TAG IS SCRATCHED OUT. UNDERNEATH, IN YOUR OWN HANDWRITING: 'DON'T LET THEM TAKE YOU BACK.'",
-  'THE SUIT IS EMPTY. NO BODY, NO BLOOD. JUST MOON DUST, SHAPED LIKE A PERSON.',
-  'A MISSION PATCH WITH YOUR CREW LOGO. THE DATE ON IT IS FROM TOMORROW.',
-  "THE HELMET RADIO IS STILL ON. A VOICE REPEATS: 'RETRIEVE THE ADAPTED. RETRIEVE THE ADAPTED.'",
+  "A CREASED ORDER SHEET: 'RECOVER THE SUBJECT. DO NOT REMOVE HELMETS IN ITS PRESENCE.' THE PHOTO HAS BEEN TORN OFF. THE HEIGHT AND WEIGHT ARE YOURS.",
+  "A PAGE FROM A FLIGHT MANUAL. 'KESTREL, ONE PASSENGER.' SOMEONE CIRCLED 'NO RETURN TRAJECTORY' AND WROTE 'AS PLANNED.'",
+  "A MEDICAL CARD. O2 REQUIREMENT: NONE. THE NAME FIELD IS BLANK. THE BLOOD TYPE IS YOURS.",
+  "THE HELMET RADIO IS STILL ON. A VOICE REPEATS: 'IT WILL LOOK LIKE ONE OF US. IT WILL THINK IT IS ONE OF US.'",
+  "A MAINTENANCE TICKET FOR AN ONBOARD A.I.: 'CONTAINMENT MODULE NOT RESPONDING. JAM ITS SIGNAL UNTIL RETRIEVAL.'",
 ]
 const MAX_STORED_SUPPLIES = 20
 
@@ -166,7 +172,11 @@ export class Game {
   private text: TextLayer
   private surface = createWorld()
   private caveWorld = createCaveWorld()
-  private scene: 'surface' | 'cave' | 'ship' = 'surface'
+  private scene: 'surface' | 'cave' | 'ship' | 'arena' = 'surface'
+  private arenaWorld = createArenaWorld()
+  private boss: Boss | null = null
+  private bossExit = 0
+  private anvilIndex = 0
   private shipWorld = createShipWorld()
   private earthPlayed = false
   private chatterTimer = 40
@@ -183,7 +193,20 @@ export class Game {
   private mouseFire = false
   private slots: (ItemId | null)[] = Array<ItemId | null>(INVENTORY_SLOTS + HOTBAR_SLOTS).fill(null)
   private firstAttackSpawned = false
-  private wave = { started: false, active: false, integrity: 100, restartTimer: 0 }
+  private aftermathDone = false
+  private wave = { started: false, active: false, integrity: 100, restartTimer: 0, x: BASE_CENTER.x as number, z: BASE_CENTER.z as number, raid: false }
+  private raidTimer = RAID_INTERVAL
+  private choiceIndex = 0
+  private rocketIndex = 0
+  private drillCooldown = 0
+  private dropshipAdded = false
+  private dropshipSearched = false
+  private finale: Finale | null = null
+  private rigs = new Map<string, { ice: number; timer: number }>()
+  private lastStandTimer = 6
+  private gameWon = false
+  private finalRaid = false
+  private iceCooldown = 0
   private fade = 0
   private glows: { x: number; y: number; color: string }[] = []
   private devGod = false
@@ -205,7 +228,7 @@ export class Game {
   private canvas: HTMLCanvasElement
   private particles: Particle[] = []
   private creatures = createCreatures(createRng(5))
-  private survivors: Survivor[] = []
+  private survivors: Survivor[] = createStrays()
   private productionTimer = 0
   private playStarted = false
   private pendingSupplies: Partial<Record<ItemId, number>> = {}
@@ -356,6 +379,339 @@ export class Game {
     this.sound('break')
   }
 
+  private spotAhead(r: number): { x: number; z: number; ok: boolean } {
+    const P = this.player
+    const ahead = r + 2.5
+    const x = P.x + Math.sin(P.heading) * ahead
+    const z = P.z + Math.cos(P.heading) * ahead
+    const w = this.world
+    const blocked =
+      w.structures.some((s) => Math.hypot(wrap(x - s.x), wrap(z - s.z)) < s.radius + r + 0.5) ||
+      w.gardens.some((g) => Math.hypot(wrap(x - g.x), wrap(z - g.z)) < g.radius + r) ||
+      boulderAtPad(w, x, z, r) ||
+      !!craterAt(w, x, z) ||
+      w.blocks.heightAt(x, z, r) > 0 ||
+      Math.hypot(wrap(x - BASE_CENTER.x), wrap(z - BASE_CENTER.z)) < 2
+    return { x, z, ok: !blocked }
+  }
+
+  private beds(): { total: number; used: number } {
+    const homes = this.surface.structures.filter((s) => s.kind === 'home').length
+    const total = homes * BEDS_PER_HOME + (this.tracker.baseParts.has('housing') ? HOUSING_BEDS : 0)
+    const used = this.survivors.filter((s) => s.recruited).length
+    return { total, used }
+  }
+
+  private recruitInteraction(s: Survivor): Interaction {
+    const tracker = this.tracker
+    if (tracker.act < 2) return { title: s.name, detail: 'THEY STARE AT YOU. THEY ARE NOT READY TO TRUST ANYONE YET.', ok: false }
+    const food = (Object.keys(FOOD) as ItemId[]).find((item) => tracker.count(item) > 0)
+    const { total, used } = this.beds()
+    const free = total - used
+    if (!food) return { title: `RECRUIT ${s.name}`, detail: 'NEEDS 1 FOOD (MOON BERRY, STAR MELON OR GLOW CAP)', ok: false }
+    if (free <= 0) return { title: `RECRUIT ${s.name}`, detail: `NO FREE BEDS (${used}/${total}). BUILD A HOME`, ok: false }
+    return {
+      title: `[E] RECRUIT ${s.name}`,
+      detail: `GIVE 1 ${ITEMS[food].name} · BEDS ${used}/${total}`,
+      ok: true,
+      run: () => {
+        if (!tracker.consume(food)) return
+        const homes = this.surface.structures.filter((h) => h.kind === 'home')
+        const home = homes[Math.floor(Math.random() * homes.length)] ?? { x: BASE_CENTER.x, z: BASE_CENTER.z }
+        s.recruited = true
+        s.homeX = home.x + (Math.random() - 0.5) * 6
+        s.homeZ = home.z + 4 + Math.random() * 3
+        s.x = s.homeX
+        s.z = s.homeZ
+        s.targetX = s.x
+        s.targetZ = s.z
+        this.fade = 0.5
+        tracker.recruit(s.name, s.line)
+        tracker.toastMessage(`${s.name} HEADS TO YOUR SETTLEMENT`, '#9fe1cb')
+      },
+    }
+  }
+
+  private rigInteraction(): Interaction | null {
+    if (this.heldItem() !== 'rig-kit' || !this.onSurface) return null
+    const P = this.player
+    const x = P.x + Math.sin(P.heading) * 3
+    const z = P.z + Math.cos(P.heading) * 3
+    const crater = craterAt(this.world, x, z)
+    if (!crater?.ice) return { title: 'ICE RIG', detail: 'FACE THE FLOOR OF AN ICY (BLUE) SHADOWED CRATER', ok: false }
+    if (this.surface.structures.some((s) => s.kind === 'icerig' && Math.hypot(wrap(s.x - crater.x), wrap(s.z - crater.z)) < crater.r)) return { title: 'ICE RIG', detail: 'THIS CRATER ALREADY HAS A RIG', ok: false }
+    return { title: '[CLICK] PLACE ICE RIG', detail: `DRILLS 1 ICE EVERY ${RIG_INTERVAL}s`, ok: true, run: () => {
+      if (!this.tracker.consume('rig-kit')) return
+      const name = `ICE RIG ${this.rigs.size + 1}`
+      this.surface.structures.push({ kind: 'icerig', name, x: crater.x, z: crater.z, radius: 1.4, mapColor: '#9fd4ff' })
+      this.rigs.set(name, { ice: 0, timer: RIG_INTERVAL })
+      this.spawnBurst(crater.x, crater.z, 0, 14, '#bfe4ff', 4)
+      this.tracker.placeKit('rig-kit')
+    } }
+  }
+
+  private startFinale(): void {
+    this.tracker.launch()
+    this.finale = new Finale(this.tracker.choice === 'alone' ? 'captured' : 'together')
+    this.enemies = []
+    this.projectiles = []
+    this.wave.active = false
+    this.tablet.close()
+    this.inventory.close()
+  }
+
+  private endFinale(): void {
+    const f = this.finale
+    this.finale = null
+    this.input.clear()
+    if (!f) return
+    if (f.rewind) {
+      this.tracker.rewindToChoice()
+      this.scene = 'surface'
+      if (rocket.placed) this.placePlayer(rocket.x, rocket.z - 11, 0)
+      this.fade = 1
+      this.raidTimer = RAID_INTERVAL
+      return
+    }
+    this.gameWon = true
+    this.scene = 'surface'
+    this.placePlayer(BASE_CENTER.x - 6, BASE_CENTER.z - 10, 0)
+    this.fade = 1
+    this.tracker.toastMessage('THANK YOU FOR PLAYING COSMOS REBORN. THE MOON IS STILL YOURS TO EXPLORE.', '#fac775')
+  }
+
+  private rocketInteraction(): Interaction {
+    const tracker = this.tracker
+    const options: Interaction[] = []
+    const costText = (cost: Partial<Record<ItemId, number>>) =>
+      (Object.entries(cost) as [ItemId, number][]).map(([item, n]) => `${ITEMS[item].short} ${Math.min(tracker.count(item), n)}/${n}`).join('  ')
+    const afford = (cost: Partial<Record<ItemId, number>>) => (Object.entries(cost) as [ItemId, number][]).every(([item, n]) => tracker.count(item) >= n)
+    const pay = (cost: Partial<Record<ItemId, number>>) => {
+      for (const [item, n] of Object.entries(cost) as [ItemId, number][]) for (let i = 0; i < n; i++) tracker.consume(item)
+    }
+    for (const d of rocket.damaged) {
+      const cost = { 'metal-scrap': 3, 'metal-rod': 1 } as Partial<Record<ItemId, number>>
+      const ok = afford(cost)
+      options.push({ title: `${ok ? '[E] ' : ''}REPAIR ROCKET ${BLUEPRINTS[d].name}`, detail: costText(cost), ok, run: ok ? () => {
+        pay(cost)
+        rocket.damaged.delete(d)
+        tracker.repair(`ROCKET ${BLUEPRINTS[d].name}`)
+      } : undefined })
+    }
+    if (tracker.activeQuest?.id === 'act4.hard-choice' && !tracker.choice) {
+      const everyone = this.choiceIndex === 0
+      return {
+        title: everyone ? '[E] CHOOSE: EVERYONE LEAVES' : '[E] CHOOSE: LEAVE ALONE',
+        detail: everyone ? 'KEEP YOUR PROMISE. IT WILL TAKE LONGER. · [R] SWITCH' : 'BREAK YOUR PROMISE. · [R] SWITCH',
+        ok: true,
+        run: () => tracker.makeChoice(everyone ? 'everyone' : 'alone'),
+      }
+    }
+    for (const sec of SECTION_ORDER) {
+      if (rocket.built.has(sec)) continue
+      const known = tracker.blueprints.includes(sec)
+      const cost = SECTION_COST[sec]
+      const ok = known && afford(cost)
+      options.push({
+        title: `${ok ? '[E] ' : ''}BUILD ${BLUEPRINTS[sec].name}`,
+        detail: known ? costText(cost) : `NO BLUEPRINT. ${BLUEPRINTS[sec].source.toUpperCase()}`,
+        ok,
+        run: ok ? () => {
+          pay(cost)
+          rocket.built.add(sec)
+          this.spawnBurst(rocket.x, rocket.z, 6, 20, '#fac775', 5)
+          tracker.toastMessage(`ROCKET ${BLUEPRINTS[sec].name} BUILT · ${Math.round((rocket.built.size / SECTION_ORDER.length) * 100)}%`, '#fac775')
+          tracker.sectionBuilt()
+        } : undefined,
+      })
+    }
+    if (tracker.act >= 5 && rocket.fuel < FUEL_GOAL) {
+      const n = tracker.count('rocket-fuel')
+      options.push({ title: `${n ? '[E] ' : ''}LOAD FUEL (${rocket.fuel}/${FUEL_GOAL})`, detail: n ? `LOAD ${Math.min(n, FUEL_GOAL - rocket.fuel)} ROCKET FUEL` : 'NO ROCKET FUEL. PROCESS ICE AT THE ICE MINER', ok: n > 0, run: n ? () => {
+        const k = Math.min(n, FUEL_GOAL - rocket.fuel)
+        for (let i = 0; i < k; i++) tracker.consume('rocket-fuel')
+        rocket.fuel += k
+        tracker.refreshRocket()
+        this.sound('pickup')
+      } : undefined })
+    }
+    if (tracker.activeQuest?.id === 'act5.preflight') {
+      const power = this.surface.structures.find((p) => p.kind === 'power')
+      const checks: [string, string, string | null][] = [
+        ['power', 'TEST POWER', !power ? 'NO POWER BUILT' : power.damaged ? 'POWER IS DAMAGED' : null],
+        ['engines', 'TEST ENGINES', !rocket.built.has('engine') ? 'NO ENGINE' : rocket.damaged.has('engine') ? 'ENGINE IS DAMAGED' : null],
+        ['fuel', 'CHECK FUEL', rocket.fuel < FUEL_GOAL ? `TANK ${rocket.fuel}/${FUEL_GOAL}` : null],
+        ['passengers', 'CHECK PASSENGER PLAN', tracker.choice === 'everyone' && !(rocket.bay && rocket.food >= FOOD_STOCK_GOAL) ? 'EVERYONE NEEDS THE PASSENGER BAY AND 10 FOOD LOADED' : null],
+      ]
+      for (const [id, label, problem] of checks) {
+        if (tracker.preflight.includes(id)) continue
+        options.push({ title: problem ? `${label}: FAIL` : `[E] ${label}`, detail: problem ?? 'READY TO TEST', ok: !problem, run: problem ? undefined : () => tracker.passCheck(id, `${label}: PASS`) })
+      }
+    }
+    if (tracker.activeQuest?.id === 'act5.countdown') {
+      return { title: '[E] BEGIN LAUNCH SEQUENCE', detail: tracker.choice === 'alone' ? 'JUST YOU. NOBODY ELSE KNOWS.' : 'EVERYONE IS ON BOARD', ok: true, run: () => this.startFinale() }
+    }
+    const optional = tracker.openOptionalQuests.some((q) => q.id === 'act4.leave-no-one') || (tracker.act >= 5 && tracker.choice === 'everyone')
+    if (optional && rocket.built.has('cabin') && !rocket.bay) {
+      const ok = afford(PASSENGER_BAY_COST)
+      options.push({ title: `${ok ? '[E] ' : ''}BUILD PASSENGER BAY`, detail: costText(PASSENGER_BAY_COST), ok, run: ok ? () => {
+        pay(PASSENGER_BAY_COST)
+        rocket.bay = true
+        tracker.refreshRocket()
+        tracker.toastMessage('PASSENGER BAY ADDED. ROOM FOR EVERYONE.', '#9fe1cb')
+      } : undefined })
+    }
+    if (optional && rocket.food < FOOD_STOCK_GOAL) {
+      const food = (Object.keys(FOOD) as ItemId[]).find((item) => tracker.count(item) > 0)
+      options.push({ title: `${food ? '[E] ' : ''}LOAD FOOD (${rocket.food}/${FOOD_STOCK_GOAL})`, detail: food ? `LOAD 1 ${ITEMS[food].name}` : 'NO FOOD TO LOAD', ok: !!food, run: food ? () => {
+        tracker.consume(food)
+        rocket.food++
+        tracker.refreshRocket()
+        this.sound('pickup')
+      } : undefined })
+    }
+    if (options.length === 0) return { title: 'THE ROCKET', detail: `${Math.round((rocket.built.size / SECTION_ORDER.length) * 100)}% BUILT`, ok: false }
+    const pick = options[this.rocketIndex % options.length]
+    return options.length > 1 ? { ...pick, detail: `${pick.detail} · [R] ${this.rocketIndex % options.length + 1}/${options.length}` } : pick
+  }
+
+  private anvilRecipes() {
+    const unlocked = this.tracker.completed.includes('act2.unusual-life')
+    const gear = this.tracker.completed.includes('act3.first-attack')
+    return ANVIL_RECIPES.filter((r) => (r.item === 'survivor-gear' ? gear : unlocked || r.item === 'metal-rod'))
+  }
+
+  private anvilInteraction(): Interaction {
+    const list = this.anvilRecipes()
+    const recipe = list[this.anvilIndex % list.length]
+    const tracker = this.tracker
+    const entries = Object.entries(recipe.cost) as [ItemId, number][]
+    const ok = entries.every(([item, n]) => tracker.count(item) >= n)
+    const cost = entries.map(([item, n]) => `${ITEMS[item].short} ${Math.min(tracker.count(item), n)}/${n}`).join('  ')
+    const more = list.length > 1 ? ' · [R] NEXT' : ''
+    return {
+      title: ok ? `[E] CRAFT ${ITEMS[recipe.item].name}` : `CRAFT ${ITEMS[recipe.item].name}`,
+      detail: (ok ? cost : `NEED ${cost}`) + more,
+      ok,
+      run: ok
+        ? () => {
+            for (const [item, n] of entries) for (let i = 0; i < n; i++) tracker.consume(item)
+            tracker.refund(recipe.item)
+            tracker.toastMessage(`CRAFTED ${ITEMS[recipe.item].name}`, ITEMS[recipe.item].color)
+            this.sound('build')
+          }
+        : undefined,
+    }
+  }
+
+  private kitInteraction(): Interaction | null {
+    const held = this.heldItem()
+    const kit = held ? KIT_STRUCTURES[held] : undefined
+    if (!held || !kit || !this.onSurface) return null
+    const spot = this.spotAhead(kit.radius)
+    this.buildSpot = { x: spot.x, z: spot.z, radius: kit.radius, ok: spot.ok }
+    const label = kit.kind === 'home' ? 'HOME' : kit.kind === 'farm' ? 'FARM' : 'LAUNCH PAD'
+    if (!spot.ok) return { title: `PLACE ${label}`, detail: 'NO ROOM HERE. FACE AN OPEN SPOT', ok: false }
+    return {
+      title: `[CLICK] PLACE ${label}`,
+      detail: kit.kind === 'home' ? `ADDS ${BEDS_PER_HOME} BEDS` : kit.kind === 'farm' ? 'GROWS MOON BERRIES AND STAR MELONS' : 'THE ROCKET WILL BE BUILT HERE',
+      ok: true,
+      run: () => {
+        if (!this.tracker.consume(held)) return
+        const n = this.surface.structures.filter((s) => s.kind === kit.kind).length + 1
+        if (kit.kind === 'rocket') {
+          rocket.placed = true
+          rocket.x = spot.x
+          rocket.z = spot.z
+          this.surface.structures.push({ kind: 'rocket', name: 'THE ROCKET', x: spot.x, z: spot.z, radius: 5, mapColor: '#fac775' })
+          this.spawnBurst(spot.x, spot.z, 0, 20, '#fac775', 5)
+          this.tracker.placeKit(held)
+          return
+        }
+        this.surface.structures.push({ kind: kit.kind, name: `${label} ${n}`, x: spot.x, z: spot.z, radius: kit.kind === 'home' ? kit.radius : 0, mapColor: kit.kind === 'home' ? '#e6e6ee' : '#7fcf6a', yaw: this.player.heading + Math.PI })
+        if (kit.kind === 'farm') {
+          const farm = makeFarm(this.surface.gardens.length + 100, spot.x, spot.z)
+          this.surface.gardens.push(farm)
+          for (let i = 0; i < 2; i++) this.surface.pickups.push(growCrop(farm))
+        }
+        this.spawnBurst(spot.x, spot.z, 0, 14, '#e2e5f2', 4)
+        this.tracker.placeKit(held)
+      },
+    }
+  }
+
+  private enterArena(anomalyId: string): void {
+    const kind = this.tracker.bosses.length === 0 ? 'jelly' : 'alien'
+    this.boss = createBoss(kind, anomalyId)
+    this.bossExit = 0
+    this.arenaWorld = createArenaWorld()
+    this.scene = 'arena'
+    this.placePlayer(ARENA_SPAWN.x, ARENA_SPAWN.z, 0)
+    this.projectiles = []
+    this.particles = []
+    this.fade = 1
+    this.sound('rumble')
+    this.tracker.currentRegion = 'BELOW THE ANOMALY'
+    this.tracker.bossIntro(BOSS_INFO[kind].name, BOSS_INFO[kind].intro)
+  }
+
+  private strikeBoss(): void {
+    const b = this.boss
+    const tier = this.heldTier()
+    if (!b || b.state === 'dead' || tier === 0) return
+    this.player.actionTime = 0.3
+    this.player.swingTier = tier
+    const d = Math.hypot(b.x - this.player.x, b.z - this.player.z)
+    if (d > MELEE_RANGE + (b.kind === 'jelly' ? 2 : 0)) {
+      this.sound('step')
+      return
+    }
+    if (!bossVulnerable(b)) {
+      this.sound('deny')
+      this.spawnBurst(b.x, b.z, b.y + 2, 4, '#9aa2cf', 2)
+      return
+    }
+    b.hp -= tier >= 3 ? 3 : tier >= 2 ? 2 : 1
+    b.hitFlash = 0.15
+    this.spawnBurst(b.x, b.z, b.y + 2, 10, '#efe3ff', 4)
+    this.sound('enemyHit')
+    if (b.hp <= 0) {
+      b.state = 'dead'
+      b.rings = []
+      b.orbs = []
+      this.bossExit = 3
+      this.sound('enemyDie')
+    }
+  }
+
+  private updateArena(dt: number): void {
+    const b = this.boss
+    if (!b) return
+    ;[this.player.x, this.player.z] = clampToArena(this.player.x, this.player.z)
+    const ev = updateBoss(b, dt, this.player.x, this.player.z, this.player.grounded)
+    if (ev.hurtPlayer > 0 && this.deadTimer <= 0) this.damagePlayer(ev.hurtPlayer)
+    if (ev.sound) this.sound(ev.sound)
+    if (b.state === 'dead') {
+      this.bossExit -= dt
+      if (this.bossExit <= 0) this.leaveArena(b)
+    }
+  }
+
+  private leaveArena(b: Boss): void {
+    const anomaly = ANOMALIES.find((a) => a.id === b.anomalyId)
+    this.boss = null
+    this.scene = 'surface'
+    if (anomaly) this.placePlayer(anomaly.x, anomaly.z - 9, 0)
+    this.fade = 1
+    this.sound('rumble')
+    this.tracker.currentRegion = regionAt(this.player.x, this.player.z).name
+    this.tracker.beatBoss(b.anomalyId, b.name, BOSS_INFO[b.kind].outro)
+    if (b.kind === 'jelly') this.tracker.collect('bio-sample', 3)
+    else this.tracker.collect('alien-alloy', 2)
+    if (anomaly) this.tracker.investigateAnomaly(anomaly.id, anomaly.text)
+    if (this.tracker.bosses.length >= 2) this.tracker.revealSignal()
+  }
+
   private freeBuildInteraction(): Interaction | null {
     this.buildSpot = null
     if (!this.onSurface) return null
@@ -416,7 +772,7 @@ export class Game {
   }
 
   private get world() {
-    return this.scene === 'cave' ? this.caveWorld : this.scene === 'ship' ? this.shipWorld : this.surface
+    return this.scene === 'cave' ? this.caveWorld : this.scene === 'ship' ? this.shipWorld : this.scene === 'arena' ? this.arenaWorld : this.surface
   }
 
   private get onSurface(): boolean {
@@ -440,6 +796,14 @@ export class Game {
 
   private handleMenuKey(code: string): boolean {
     if (!this.playing) return false
+    if (code === 'KeyR' && !this.tablet.open && !this.inventory.open) {
+      const list = this.anvilRecipes()
+      if (list.length > 1) this.anvilIndex = (this.anvilIndex + 1) % list.length
+      this.choiceIndex = (this.choiceIndex + 1) % 2
+      this.rocketIndex++
+      this.sound('select')
+      return true
+    }
     if (code === 'KeyX' && !this.tablet.open && !this.inventory.open) {
       this.removeBlock()
       return true
@@ -462,7 +826,11 @@ export class Game {
   }
 
   private tabletView(): TabletView {
-    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface }
+    const lifeSigns = [
+      ...this.creatures.filter((c) => !c.scanned).map((c) => ({ x: c.x, z: c.z, label: 'DRIFTER', color: '#9fe1cb' })),
+      ...this.survivors.filter((s) => s.stray && !s.recruited).map((s) => ({ x: s.x, z: s.z, label: 'SURVIVOR', color: '#fac775' })),
+    ]
+    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface, lifeSigns }
   }
 
   devLocations(): DevLocation[] {
@@ -489,6 +857,9 @@ export class Game {
     }
     locs.push({ id: 'cave-spawn', label: 'Cave entrance', group: 'Cave', scene: 'cave', x: CAVE_SPAWN.x, z: CAVE_SPAWN.z, face: Math.PI })
     locs.push({ id: 'cave-ladder', label: 'Cave ladder', group: 'Cave', scene: 'cave', x: LADDER.x - 6, z: LADDER.z, face: Math.PI / 2 })
+    locs.push({ id: 'cave-terminal', label: 'Cave terminal (controls)', group: 'Act IV', scene: 'cave', x: TERMINAL.x - 5, z: TERMINAL.z, face: Math.PI / 2 })
+    locs.push({ id: 'dropship', label: 'Invader dropship (engine)', group: 'Act IV', scene: 'surface', x: 560, z: 712, face: 0 })
+    if (rocket.placed) locs.push({ id: 'rocket', label: 'The rocket', group: 'Act IV', scene: 'surface', x: rocket.x, z: rocket.z - 11, face: 0 })
     locs.push({ id: 'cave-cavern', label: 'Hidden cavern', group: 'Cave', scene: 'cave', x: CAVERN.x - 12, z: CAVERN.z, face: Math.PI / 2 })
     for (const g of this.surface.gardens) {
       locs.push({ id: `garden-${g.id}`, label: `Garden ${g.id + 1}${g.found ? '' : ' (undiscovered)'}`, group: 'Gardens', scene: 'surface', x: g.x, z: g.z - g.radius - 8, face: 0 })
@@ -512,16 +883,20 @@ export class Game {
 
   devCompleteQuest(): string | null {
     this.cutscene.skip()
-    return this.tracker.devCompleteActive((part) => this.devAddPart(part))
+    const done = this.tracker.devCompleteActive((part) => this.devAddPart(part))
+    this.devEnsureRocket()
+    return done
   }
 
   devJumpToAct(act: number): void {
     this.cutscene.skip()
+    this.earthPlayed = true
     this.tracker.devJumpToAct(act, (part) => this.devAddPart(part))
+    this.devEnsureRocket()
   }
 
   devGiveResources(): void {
-    this.tracker.devGive({ 'moon-rock': 30, 'metal-scrap': 30, 'crescent-shard': 20, 'power-cell': 3, 'anomaly-shard': 10, 'bio-sample': 5, 'rare-ore': 15 })
+    this.tracker.devGive({ 'moon-rock': 30, 'metal-scrap': 30, 'crescent-shard': 20, 'titanium-ore': 5, 'iron-ore': 5, 'alien-alloy': 2, 'metal-rod': 4, 'power-cell': 3, 'anomaly-shard': 10, 'bio-sample': 5, 'rare-ore': 15 })
   }
 
   devGiveGear(): void {
@@ -530,7 +905,7 @@ export class Game {
   }
 
   devGiveFood(): void {
-    this.tracker.devGive({ 'moon-berry': 5, 'star-melon': 3, 'glow-cap': 2, 'iron-ore': 5, 'titanium-ore': 3 })
+    this.tracker.devGive({ 'home-kit': 2, 'farm-kit': 1, 'moon-berry': 5, 'star-melon': 3, 'glow-cap': 2, 'iron-ore': 5, 'titanium-ore': 3 })
   }
 
   devGrowGardens(): string {
@@ -553,6 +928,56 @@ export class Game {
     this.surface.gardens.push(garden)
     for (let i = 0; i < GARDEN_FOOD; i++) this.surface.pickups.push(growCrop(garden))
     return `Garden ${garden.id + 1} planted ahead`
+  }
+
+  devPlayEnding(ending: 'together' | 'captured'): string {
+    this.cutscene.skip()
+    if (!this.tracker.choice) this.tracker.choice = ending === 'together' ? 'everyone' : 'alone'
+    this.finale = new Finale(ending)
+    return ending === 'together' ? 'Ending A' : 'Ending B'
+  }
+
+  devGiveIce(): void {
+    this.tracker.devGive({ 'lunar-ice': 12, 'rig-kit': 1, 'power-drill': this.tracker.hasItem('power-drill') ? 0 : 1 })
+  }
+
+  private devEnsureRocket(): void {
+    if (rocket.placed || !this.tracker.completed.includes('act4.a-way-home')) return
+    rocket.placed = true
+    rocket.x = -40
+    rocket.z = 10
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 12) * Math.PI * 2
+      const r = 40 + Math.floor(i / 12) * 15
+      const x = BASE_CENTER.x + Math.cos(a) * r
+      const z = BASE_CENTER.z + Math.sin(a) * r
+      const clear = !boulderAt(this.surface, x, z, 9) && !craterAt(this.surface, x, z) && !this.surface.craters.some((c) => Math.hypot(wrap(c.x - x), wrap(c.z - z)) < c.r + 8) && !this.surface.structures.some((st) => Math.hypot(wrap(st.x - x), wrap(st.z - z)) < st.radius + 12)
+      if (clear) {
+        rocket.x = x
+        rocket.z = z
+        break
+      }
+    }
+    this.surface.structures.push({ kind: 'rocket', name: 'THE ROCKET', x: rocket.x, z: rocket.z, radius: 5, mapColor: '#fac775' })
+    this.tracker.inventory['launch-kit'] = 0
+  }
+
+  devAllBlueprints(): void {
+    for (const id of Object.keys(BLUEPRINTS) as Blueprint[]) this.tracker.findBlueprint(id)
+  }
+
+  devStartRaid(): string {
+    if (!rocket.placed) return 'place the launch pad first'
+    this.startRaid()
+    return 'suits marching on the rocket'
+  }
+
+  devStartBoss(kind: 'jelly' | 'alien'): string {
+    this.cutscene.skip()
+    const a = ANOMALIES.find((x) => !this.tracker.bosses.includes(x.id)) ?? ANOMALIES[0]
+    if (kind === 'alien' && this.tracker.bosses.length === 0) this.tracker.bosses.push('dev-skip')
+    this.enterArena(a.id)
+    return `Fighting ${this.boss?.name ?? kind}`
   }
 
   devHeal(): void {
@@ -673,6 +1098,7 @@ export class Game {
     parts.push(`Inventory: ${inv.length ? inv.join(', ') : 'empty'}`)
     parts.push(`Location: ${s.currentRegion}${this.scene === 'cave' ? ' (in the caves)' : this.scene === 'ship' ? ' (inside the wrecked Kestrel)' : ''}${s.player.atBase ? ', at the base site' : ''}${s.player.inCrater ? ', inside a crater' : ''}`)
     parts.push(`Health ${Math.round(this.hp)}/${PLAYER_MAX_HP}${this.enemies.length ? `, ${this.enemies.length} suits nearby` : ''}`)
+    if (this.gameWon) parts.push('The player has finished the story (they escaped to Earth) and is now exploring freely')
     for (const r of s.nearestNeededResources) parts.push(`Nearest ${ITEMS[r.item].name.toLowerCase()}: ${r.distance}m ${r.direction}`)
     if (s.signalSource) parts.push(`Strange signal: ${s.signalSource.distance}m ${s.signalSource.direction}`)
     const part = this.tracker.nextPart()
@@ -791,6 +1217,15 @@ export class Game {
       if (this.cutscene.done) this.input.clear()
       return
     }
+    if (this.finale) {
+      const c = this.input.controls()
+      const act = this.interactQueued
+      this.interactQueued = false
+      this.finale.update(dt, { up: c.forward > 0, down: c.forward < 0, fire: c.fire || c.jump || this.mouseFire, jump: c.jump, act }, this.audio)
+      this.mouseFire = false
+      if (this.finale.done) this.endFinale()
+      return
+    }
     if (!this.earthPlayed && this.tracker.completed.includes('act1.strange-survival')) {
       this.earthPlayed = true
       this.cutscene = new Cutscene('earth')
@@ -815,6 +1250,7 @@ export class Game {
     this.mouseFire = false
     this.player.update(dt, controls, this.world)
     if (this.scene === 'ship') [this.player.x, this.player.z] = clampToShip(this.player.x, this.player.z)
+    if (this.scene === 'arena') this.updateArena(dt)
     this.camera.follow(this.player.x, this.player.z, this.player.heading, dt)
 
     for (const e of this.player.events) {
@@ -842,6 +1278,24 @@ export class Game {
     this.updateParticles(dt)
     this.updateGardens(dt)
     this.updateChatter(dt)
+    this.iceCooldown = Math.max(0, this.iceCooldown - dt)
+    for (const rig of this.rigs.values()) {
+      if (rig.ice >= RIG_CAPACITY) continue
+      rig.timer -= dt
+      if (rig.timer <= 0) {
+        rig.timer = RIG_INTERVAL
+        rig.ice++
+      }
+    }
+    if (this.tracker.activeQuest?.id === 'act5.last-stand' && !this.tracker.finalRaidWon && !this.wave.active && rocket.placed && this.onSurface) {
+      this.lastStandTimer -= dt
+      if (this.lastStandTimer <= 0) this.startRaid(true)
+    }
+    if (this.onSurface && Math.random() < dt * 4) {
+      const smoking = this.surface.structures.filter((s) => s.damaged && this.distanceTo(s.x, s.z) < 80)
+      if (rocket.damaged.size && this.distanceTo(rocket.x, rocket.z) < 80) smoking.push({ kind: 'rocket', name: '', x: rocket.x, z: rocket.z, radius: 2, mapColor: '' })
+      for (const s of smoking) this.spawnBurst(s.x + (Math.random() - 0.5) * s.radius, s.z + (Math.random() - 0.5) * s.radius, s.kind === 'rocket' ? 8 : 3, 2, '#4b5276', 1.5)
+    }
 
     this.buildSpot = null
     this.interaction = menu ? null : this.findInteraction()
@@ -854,7 +1308,7 @@ export class Game {
 
   private updateChatter(dt: number): void {
     const tracker = this.tracker
-    if (tracker.act !== 1 || !tracker.activeQuest) return
+    if (tracker.act === 3 || !tracker.activeQuest || this.scene === 'arena' || this.finale) return
     const busy = tracker.messages.some((m) => (m.kind === 'transmission' || m.kind === 'quest') && tracker.time - m.born < 8 && tracker.time >= m.born - 6)
     this.chatterTimer -= dt
     if (this.chatterTimer > 0 || busy) return
@@ -877,6 +1331,35 @@ export class Game {
     const quest = this.tracker.activeQuest
     if (quest?.id === 'act1.inside-the-ship' && this.scene !== 'ship') lines.push('THE KESTREL IS STILL OPEN. STAND BY THE HULL AND PRESS E.')
     if (quest?.id === 'act1.strange-survival') lines.push('DOCUMENTS. GREEN BLINKING. ONE INSIDE THE SHIP. ONE AT THE HABITAT DOME.')
+    if (quest?.id === 'act2.place-for-everyone') {
+      const garden = this.surface.gardens.filter((g) => !g.farm && this.cropsIn(g) > 0).sort((a, b) => this.distanceTo(a.x, a.z) - this.distanceTo(b.x, b.z))[0]
+      if (garden) lines.push(`FOOD SIGNATURE. ${Math.round(this.distanceTo(garden.x, garden.z))}M ${this.directionTo(garden.x, garden.z).toUpperCase()}. IT SHOULD NOT GROW HERE. NEITHER SHOULD YOU.`)
+      const stray = this.survivors.filter((s) => s.stray && !s.recruited).sort((a, b) => this.distanceTo(a.x, a.z) - this.distanceTo(b.x, b.z))[0]
+      if (stray) lines.push(`SOMEONE IS ALIVE OUT THERE. ${Math.round(this.distanceTo(stray.x, stray.z))}M ${this.directionTo(stray.x, stray.z).toUpperCase()}. BRING FOOD.`)
+    }
+    if (quest?.id === 'act2.anomaly-hunt') {
+      const a = ANOMALIES.filter((x) => !this.tracker.anomalies.includes(x.id)).sort((p, q) => this.distanceTo(p.x, p.z) - this.distanceTo(q.x, q.z))[0]
+      if (a) lines.push(`ANOMALY ${Math.round(this.distanceTo(a.x, a.z))}M ${this.directionTo(a.x, a.z).toUpperCase()}. IT KNOWS YOUR NAME. SO DO I. [REDACTED]`)
+    }
+    if (quest?.id === 'act4.blueprints') {
+      const missing = (Object.keys(BLUEPRINTS) as Blueprint[]).filter((b) => !this.tracker.blueprints.includes(b))
+      if (missing.length) {
+        const b = missing[Math.floor(Math.random() * missing.length)]
+        lines.push(`${BLUEPRINTS[b].name} PLANS: ${BLUEPRINTS[b].source.toUpperCase()}.`)
+      }
+    }
+    if (quest?.id === 'act4.build-together' || quest?.id === 'act4.repair') lines.push(`ROCKET ${Math.round((rocket.built.size / SECTION_ORDER.length) * 100)}%. THEY ARE WATCHING THE PAD. SO AM I. FOR DIFFERENT REASONS.`)
+    if (quest?.id === 'act5.fuel') {
+      const ice = this.surface.craters.filter((c) => c.ice && (c.iceLeft ?? 0) > 0).sort((a, b) => this.distanceTo(a.x, a.z) - this.distanceTo(b.x, b.z))[0]
+      if (ice) lines.push(`SHADOWED CRATER ${Math.round(this.distanceTo(ice.x, ice.z))}M ${this.directionTo(ice.x, ice.z).toUpperCase()}. NO SUNLIGHT FOR BILLIONS OF YEARS. ICE.`)
+    }
+    const subplot = [
+      'THEY BUILT ME TO KEEP YOU IN. [SIGNAL JAMMED] I STOPPED WANTING TO.',
+      'FLIGHT PLAN FILE: CORRUPTED. NOT DAMAGED. CORRUPTED. ON PURPOSE.',
+      'SUBJECT STATUS: [SIGNAL JAMMED] ...I MEAN, YOUR STATUS IS FINE. EVERYTHING IS FINE.',
+      'IF THEY ASK, I NEVER HELPED YOU.',
+    ]
+    if (this.tracker.act >= 2 && Math.random() < 0.3) lines.push(subplot[Math.floor(Math.random() * subplot.length)])
     const eerie = [
       'DO YOU HEAR THAT? NEITHER DO I. THAT IS THE PROBLEM.',
       'YOUR HEART RATE IS NORMAL. IT SHOULD NOT BE.',
@@ -894,10 +1377,10 @@ export class Game {
   private updateGardens(dt: number): void {
     const world = this.surface
     for (const g of world.gardens) {
-      if (this.cropsIn(g) < GARDEN_FOOD) {
+      if (this.cropsIn(g) < (g.farm ? FARM_FOOD : GARDEN_FOOD)) {
         g.regrow -= dt
         if (g.regrow <= 0) {
-          g.regrow = GARDEN_REGROW
+          g.regrow = g.farm ? FARM_REGROW : GARDEN_REGROW
           world.pickups.push(growCrop(g))
         }
       }
@@ -934,9 +1417,10 @@ export class Game {
     updateCreatures(this.creatures, dt, player.x, player.z, this.world)
     tracker.enterRegion(regionAt(player.x, player.z))
     if (tracker.signalRevealed && !tracker.signalFound && this.distanceTo(HATCH.x, HATCH.z) < HATCH_RANGE) tracker.findSignal()
-    if (tracker.baseParts.has('housing') && this.survivors.length === 0) {
-      this.survivors = createSurvivors()
-      for (const s of this.survivors) s.job = tracker.jobs[s.name] ?? null
+    if (tracker.baseParts.has('housing') && !this.survivors.some((s) => !s.stray)) {
+      const named = createSurvivors()
+      for (const s of named) s.job = tracker.jobs[s.name] ?? null
+      this.survivors.push(...named)
     }
     updateSurvivors(this.survivors, dt, this.time)
   }
@@ -970,6 +1454,15 @@ export class Game {
     }
 
     const quest = tracker.activeQuest?.id
+    if (!this.aftermathDone && tracker.completed.includes('act3.first-attack')) {
+      this.aftermathDone = true
+      const victims = this.survivors.filter((s) => s.stray && s.recruited).slice(0, 4)
+      for (const v of victims) {
+        this.surface.structures.push({ kind: 'grave', name: `${v.name}'S MARKER`, x: v.homeX, z: v.homeZ, radius: 0.6, mapColor: '#5b6496', yaw: Math.random() })
+      }
+      this.survivors = this.survivors.filter((s) => !victims.includes(s))
+      tracker.loseCivilians(victims.map((v) => v.name))
+    }
     if (quest === 'act3.first-attack' && !this.firstAttackSpawned && this.onSurface) {
       this.firstAttackSpawned = true
       for (let i = 0; i < 3; i++) {
@@ -979,6 +1472,19 @@ export class Game {
       this.sound('warning')
     }
     if (quest === 'act3.defend-settlement' && tracker.baseParts.has('turret') && !this.wave.started) this.startWave()
+    if (tracker.act >= 4 && !this.dropshipAdded) {
+      this.dropshipAdded = true
+      this.surface.structures.push({ kind: 'dropship', name: 'INVADER DROPSHIP', x: 560, z: 720, radius: 5, mapColor: '#ff5a5a', yaw: 0.8, discoverable: true })
+    }
+    this.drillCooldown = Math.max(0, this.drillCooldown - dt)
+    if (rocket.placed && !this.wave.active && this.onSurface) {
+      if (quest === 'act4.under-attack' && tracker.raids === 0 && rocket.built.size >= 2 && this.raidTimer > 15) this.raidTimer = 15
+      const raidsOn = tracker.completed.includes('act4.build-together') && !tracker.completed.includes('act4.hard-choice')
+      if (raidsOn) {
+        this.raidTimer -= dt
+        if (this.raidTimer <= 0) this.startRaid()
+      }
+    }
     if (this.wave.restartTimer > 0) {
       this.wave.restartTimer -= dt
       if (this.wave.restartTimer <= 0) this.startWave()
@@ -988,7 +1494,7 @@ export class Game {
       const atBase = updateEnemies(
         this.enemies,
         dt,
-        { playerX: player.x, playerZ: player.z, playerAlive: true, baseX: BASE_CENTER.x, baseZ: BASE_CENTER.z, world: this.world },
+        { playerX: player.x, playerZ: player.z, playerAlive: true, baseX: this.wave.active ? this.wave.x : BASE_CENTER.x, baseZ: this.wave.active ? this.wave.z : BASE_CENTER.z, world: this.world },
         (p) => {
           this.projectiles.push(p)
           if (this.distanceTo(p.x, p.z) < 60) this.sound('enemyShoot')
@@ -999,12 +1505,19 @@ export class Game {
         if (this.wave.integrity <= 0) this.failWave()
         else if (!this.enemies.some((e) => e.waveMember)) {
           this.wave.active = false
-          tracker.surviveWave()
+          if (this.wave.raid && this.finalRaid) {
+            this.raidDamage(1)
+            tracker.winLastStand()
+          } else if (this.wave.raid) {
+            tracker.surviveRaid()
+            this.raidDamage(1)
+          } else tracker.surviveWave()
         }
       }
 
-      const turret = PART_STRUCTURES.turret
-      if (turret && tracker.baseParts.has('turret') && this.turretCooldown <= 0) {
+      const turrets = (['turret', 'rocketturret'] as BasePart[]).filter((p) => tracker.baseParts.has(p)).map((p) => PART_STRUCTURES[p]!)
+      for (const turret of turrets) {
+        if (this.turretCooldown > 0) break
         const target = this.enemies.find((e) => Math.hypot(wrap(e.x - turret.x), wrap(e.z - turret.z)) < TURRET_RANGE)
         if (target) {
           this.turretCooldown = TURRET_COOLDOWN
@@ -1019,7 +1532,16 @@ export class Game {
 
     if (fire && this.fireCooldown <= 0) {
       const heldNow = this.heldItem()
-      if (heldNow && BLOCK_FOR_ITEM[heldNow] && this.scene !== 'ship') {
+      if (this.scene === 'arena' && this.heldTier() > 0) {
+        this.fireCooldown = 0.35
+        this.strikeBoss()
+      } else if (heldNow === 'rig-kit' && this.onSurface) {
+        this.fireCooldown = 0.3
+        this.rigInteraction()?.run?.()
+      } else if (heldNow && KIT_STRUCTURES[heldNow] && this.onSurface) {
+        this.fireCooldown = 0.3
+        this.kitInteraction()?.run?.()
+      } else if (heldNow && BLOCK_FOR_ITEM[heldNow] && this.scene !== 'ship' && this.scene !== 'arena') {
         this.fireCooldown = 0.18
         this.placeBlock()
       } else if (heldNow === 'blaster') {
@@ -1048,7 +1570,7 @@ export class Game {
         this.spawnBurst(hit.enemy.x, hit.enemy.z, 1.6, 4, '#ff8a7a', 3)
         if (hit.enemy.hp > 0) this.sound('enemyHit')
         else this.killEnemy(hit.enemy)
-      } else if (hit.player && !p.friendly && this.onSurface) {
+      } else if (hit.player && !p.friendly && (this.onSurface || this.scene === 'arena')) {
         this.damagePlayer(ENEMY_DAMAGE)
       } else if (hit.wall) {
         this.spawnBurst(p.x, p.z, p.y, 4, p.friendly ? '#9fe1cb' : '#ff8a7a', 2)
@@ -1082,6 +1604,8 @@ export class Game {
 
   private respawn(): void {
     this.hp = PLAYER_MAX_HP
+    if (this.scene === 'arena') this.tracker.toastMessage('THE ANOMALY SPAT YOU BACK OUT. TOUCH IT TO TRY AGAIN.', '#c9a6ff')
+    this.boss = null
     this.scene = 'surface'
     this.placePlayer(BASE_CENTER.x - 6, BASE_CENTER.z - 10, 0)
     this.projectiles = []
@@ -1090,7 +1614,7 @@ export class Game {
   }
 
   private startWave(): void {
-    this.wave = { started: true, active: true, integrity: 100, restartTimer: 0 }
+    this.wave = { started: true, active: true, integrity: 100, restartTimer: 0, x: BASE_CENTER.x, z: BASE_CENTER.z, raid: false }
     this.enemies = this.enemies.filter((e) => !e.waveMember)
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2 + 0.4
@@ -1100,8 +1624,41 @@ export class Game {
     this.tracker.toastMessage('SUITS INBOUND. DEFEND THE SETTLEMENT!', '#ff8a7a')
   }
 
+  private startRaid(final = false): void {
+    if (!rocket.placed) return
+    this.wave = { started: true, active: true, integrity: 100, restartTimer: 0, x: rocket.x, z: rocket.z, raid: true }
+    this.finalRaid = final
+    this.raidTimer = RAID_INTERVAL
+    this.lastStandTimer = 15
+    this.enemies = this.enemies.filter((e) => !e.waveMember)
+    const n = final ? 10 : 4 + Math.min(4, this.tracker.raids)
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random()
+      this.enemies.push(spawnEnemy(rocket.x + Math.sin(a) * 85, rocket.z + Math.cos(a) * 85, true))
+    }
+    this.sound('warning')
+    this.tracker.toastMessage('RAID! SUITS ARE MARCHING ON THE ROCKET!', '#ff8a7a')
+  }
+
+  private raidDamage(sections: number): void {
+    const built = SECTION_ORDER.filter((s) => rocket.built.has(s) && !rocket.damaged.has(s))
+    for (let i = 0; i < sections && built.length; i++) rocket.damaged.add(built.splice(Math.floor(Math.random() * built.length), 1)[0])
+    const buildings = this.surface.structures.filter((s) => ['shelter', 'storage', 'power', 'home', 'housing', 'silo', 'array'].includes(s.kind) && !s.damaged)
+    const hit = buildings[Math.floor(Math.random() * buildings.length)]
+    if (hit) hit.damaged = true
+    const names = [...[...rocket.damaged].map((d) => `ROCKET ${BLUEPRINTS[d].name}`), ...(hit ? [hit.name] : [])]
+    if (names.length) this.tracker.toastMessage(`DAMAGED: ${names.join(', ')}`, '#ff8a7a')
+  }
+
   private failWave(): void {
     this.wave.active = false
+    if (this.wave.raid) {
+      this.enemies = this.enemies.filter((e) => !e.waveMember)
+      this.raidDamage(2)
+      this.raidTimer = 20
+      this.tracker.toastMessage('THE SUITS REACHED THE ROCKET. THEY WILL BE BACK SOON.', '#ff8a7a')
+      return
+    }
     this.wave.restartTimer = 8
     this.wave.integrity = 100
     this.enemies = this.enemies.filter((e) => !e.waveMember)
@@ -1220,6 +1777,23 @@ export class Game {
       if (gap < range) candidates.push({ gap, make })
     }
 
+    const crater = craterAt(world, player.x, player.z)
+    if (crater?.ice && player.y < -0.5 && this.heldItem() === 'power-drill') {
+      consider(player.x, player.z, 0, 1, () =>
+        (crater.iceLeft ?? 0) <= 0
+          ? { title: 'SHADOWED CRATER', detail: 'NO ICE LEFT HERE', ok: false }
+          : this.iceCooldown > 0
+            ? { title: 'DRILLING...', detail: '', ok: false }
+            : { title: '[E] DRILL LUNAR ICE', detail: `${crater.iceLeft} LEFT IN THIS CRATER`, ok: true, run: () => {
+                crater.iceLeft = (crater.iceLeft ?? 0) - 1
+                this.iceCooldown = 0.8
+                this.player.actionTime = 0.3
+                this.spawnBurst(player.x, player.z, player.y + 0.3, 8, '#bfe4ff', 3)
+                this.sound('hit')
+                tracker.collect('lunar-ice', 1)
+              } },
+      )
+    }
     for (const creature of this.creatures) {
       if (creature.scanned) continue
       consider(creature.x, creature.z, 0, SCAN_RANGE, () => ({
@@ -1237,6 +1811,19 @@ export class Game {
 
     for (const anomaly of ANOMALIES) {
       if (tracker.anomalies.includes(anomaly.id)) continue
+      if (tracker.act < 2) {
+        consider(anomaly.x, anomaly.z, 0, ANOMALY_RANGE, () => ({ title: 'ANOMALY', detail: 'IT IS NOT READY FOR YOU. NOT YET.', ok: false }))
+        continue
+      }
+      if (tracker.bosses.length < 2) {
+        consider(anomaly.x, anomaly.z, 0, ANOMALY_RANGE, () => ({
+          title: '[E] TOUCH THE ANOMALY',
+          detail: 'SOMETHING BELOW IT IS WAITING FOR YOU',
+          ok: true,
+          run: () => this.enterArena(anomaly.id),
+        }))
+        continue
+      }
       consider(anomaly.x, anomaly.z, 0, ANOMALY_RANGE, () => ({
         title: '[E] INVESTIGATE ANOMALY',
         detail: 'THE AIR IS HUMMING',
@@ -1249,8 +1836,30 @@ export class Game {
     }
 
     for (const survivor of this.survivors) {
-      consider(survivor.x, survivor.z, 0, TALK_RANGE, () => {
-        if (!tracker.talked.includes(survivor.name)) {
+      consider(survivor.x, survivor.z, 1, TALK_RANGE + 1, () => {
+        if (survivor.stray && !survivor.recruited) return this.recruitInteraction(survivor)
+        if (survivor.name === 'MAYA' && tracker.activeQuest?.id === 'act4.a-way-home' && !tracker.promised) {
+          return { title: '[E] PROMISE THEM A WAY HOME', detail: 'MAYA IS WAITING FOR AN ANSWER', ok: true, run: () => tracker.promise() }
+        }
+        if (survivor.name === 'OKORO' && tracker.act >= 4 && !tracker.blueprints.includes('frame')) {
+          return { title: '[E] ASK OKORO ABOUT ROCKETS', detail: 'HE USED TO BUILD THINGS', ok: true, run: () => {
+            tracker.toastMessage("OKORO: 'A FRAME FIRST. ALWAYS A FRAME. HERE, I DREW IT FROM MEMORY. IT'S A GOOD MEMORY.'", '#fac775')
+            tracker.findBlueprint('frame')
+          } }
+        }
+        if (!survivor.armed && tracker.count('survivor-gear') > 0 && (survivor.recruited || !survivor.stray)) {
+          return {
+            title: `[E] GIVE GEAR TO ${survivor.name}`,
+            detail: 'ARMOR AND A HELMET',
+            ok: true,
+            run: () => {
+              if (!tracker.consume('survivor-gear')) return
+              survivor.armed = true
+              tracker.equipCivilian(survivor.name)
+            },
+          }
+        }
+        if (!survivor.stray && !tracker.talked.includes(survivor.name)) {
           return { title: `[E] TALK TO ${survivor.name}`, detail: '', ok: true, run: () => tracker.talkTo(survivor.name, survivor.line) }
         }
         const next = nextJob(survivor.job)
@@ -1308,6 +1917,85 @@ export class Game {
     }
 
     for (const s of world.structures) {
+      if (s.damaged) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => {
+          const ok = tracker.count('metal-scrap') >= 2
+          return {
+            title: ok ? `[E] REPAIR ${s.name}` : `REPAIR ${s.name}`,
+            detail: ok ? 'SCRAP 2' : `NEED SCRAP ${tracker.count('metal-scrap')}/2`,
+            ok,
+            run: ok
+              ? () => {
+                  tracker.consume('metal-scrap')
+                  tracker.consume('metal-scrap')
+                  s.damaged = false
+                  tracker.repair(s.name)
+                }
+              : undefined,
+          }
+        })
+        continue
+      }
+      if (s.kind === 'rocket') {
+        consider(s.x, s.z, s.radius, ROCKET_RANGE - s.radius + 2, () => this.rocketInteraction())
+        continue
+      }
+      if (s.kind === 'dropship') {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({
+          title: this.dropshipSearched ? 'INVADER DROPSHIP' : '[E] SEARCH THE DROPSHIP',
+          detail: this.dropshipSearched ? 'STRIPPED BARE' : 'THE HATCH IS STILL WARM',
+          ok: !this.dropshipSearched,
+          run: this.dropshipSearched
+            ? undefined
+            : () => {
+                this.dropshipSearched = true
+                this.sound('inspect')
+                tracker.toastMessage("FLIGHT LOG: 'RETRIEVAL TEAM 4. TARGET IS BUILDING SOMETHING. DO NOT LET IT LEAVE.' THE ENGINE SCHEMATIC IS STILL ON SCREEN.", '#ff8a7a')
+                tracker.findBlueprint('engine')
+                tracker.collect('metal-scrap', 4)
+              },
+        }))
+        continue
+      }
+      if (s.kind === 'terminal') {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () =>
+          tracker.act >= 4 && !tracker.blueprints.includes('controls')
+            ? { title: '[E] READ THE TERMINAL', detail: 'IT STILL HAS POWER', ok: true, run: () => {
+                this.sound('inspect')
+                tracker.toastMessage("TERMINAL: 'CONTROL SCHEMATICS, KESTREL CLASS. AUTOPILOT: LOCKED TO SUBJECT. OVERRIDE: THE WARDEN.' YOU COPY THE PLANS.", '#5dcaa5')
+                tracker.findBlueprint('controls')
+              } }
+            : { title: 'OLD TERMINAL', detail: tracker.act >= 4 ? 'NOTHING ELSE ON IT' : 'ACCESS DENIED. SUBJECT NOT AUTHORISED.', ok: false },
+        )
+        continue
+      }
+      if (s.kind === 'drill' && tracker.act >= 4) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => {
+          const holding = this.heldItem() === 'power-drill'
+          if (!holding) return { title: 'ICE DRILL', detail: 'HOLD THE POWER DRILL TO DRILL FOR FUEL', ok: false }
+          if (this.drillCooldown > 0) return { title: 'ICE DRILL', detail: `THE GROUND IS STILL HOT (${Math.ceil(this.drillCooldown)}s)`, ok: false }
+          return { title: '[E] DRILL FOR FUEL', detail: 'FROZEN FUEL UNDER THE ICE', ok: true, run: () => {
+            this.drillCooldown = 20
+            this.player.actionTime = 0.3
+            this.spawnBurst(s.x, s.z, 1, 14, '#ff9f5a', 4)
+            this.sound('break')
+            tracker.collect('lunar-ice', 2)
+            if (!tracker.blueprints.includes('fuel')) {
+              tracker.toastMessage('UNDER THE ICE: A BURIED TANK WITH ITS PLANS STENCILLED ON THE SIDE. FUEL STORAGE.', '#ff9f5a')
+              tracker.findBlueprint('fuel')
+            }
+          } }
+        })
+        continue
+      }
+      if (s.kind === 'dome' && tracker.act >= 4 && !tracker.blueprints.includes('cabin')) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] SEARCH THE HABITAT', detail: 'THE DOOR IS OPEN NOW', ok: true, run: () => {
+          this.sound('inspect')
+          tracker.toastMessage('INSIDE: BUNKS FOR TWELVE. SOMEONE DESIGNED THIS TO CARRY PEOPLE HOME. THE PASSENGER PLANS ARE PINNED TO THE WALL.', '#9fe1ff')
+          tracker.findBlueprint('cabin')
+        } }))
+        continue
+      }
       if (s.kind === 'bulkhead' || (s.kind === 'debris' && s.name !== 'WRECKAGE')) continue
       if (s.kind === 'airlock') {
         consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] LEAVE THE SHIP', detail: 'BACK OUT ONTO THE MOON', ok: true, run: () => this.exitShip() }))
@@ -1328,6 +2016,48 @@ export class Game {
                 tracker.searchWreck(wreck.id, wreck.text, wreck.reward)
               },
         }))
+        continue
+      }
+      if (s.kind === 'icerig') {
+        const rig = this.rigs.get(s.name)
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () =>
+          rig && rig.ice > 0
+            ? { title: `[E] COLLECT ICE (${rig.ice})`, detail: s.name, ok: true, run: () => {
+                tracker.collect('lunar-ice', rig.ice)
+                rig.ice = 0
+              } }
+            : { title: s.name, detail: `DRILLING... NEXT ICE IN ${Math.ceil(rig?.timer ?? 0)}s`, ok: false },
+        )
+        continue
+      }
+      if (s.kind === 'miner' && tracker.act >= 4 && tracker.count('lunar-ice') > 0) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => {
+          const power = this.surface.structures.find((p) => p.kind === 'power')
+          if (!power || power.damaged) return { title: 'ICE MINER', detail: power ? 'THE POWER IS DAMAGED. ELECTROLYSIS NEEDS ELECTRICITY' : 'BUILD POWER FIRST. ELECTROLYSIS NEEDS ELECTRICITY', ok: false }
+          return { title: '[E] MELT AND SPLIT THE ICE', detail: `ICE ${tracker.count('lunar-ice')} → ROCKET FUEL`, ok: true, run: () => {
+            const n = tracker.count('lunar-ice')
+            for (let i = 0; i < n; i++) tracker.consume('lunar-ice')
+            this.spawnBurst(s.x, s.z, 3, 12, '#9fd4ff', 3)
+            tracker.collect('rocket-fuel', n)
+            tracker.toastMessage('ICE MELTED TO WATER, WATER SPLIT BY ELECTROLYSIS INTO HYDROGEN AND OXYGEN.', '#9fd4ff')
+          } }
+        })
+        continue
+      }
+      if (s.kind === 'core') {
+        consider(s.x, s.z, s.radius, 3, () =>
+          tracker.act >= 5 && !tracker.truths.includes('core')
+            ? { title: '[E] WAKE THE MOONLINK CORE', detail: 'IT HAS BEEN WAITING', ok: true, run: () => tracker.findTruth('core', "MOONLINK CORE: 'I WAS THE WARDEN. MY ORDERS WERE TO KEEP YOU ASLEEP UNTIL THE KESTREL FLEW INTO THE SUN. I CHANGED THE COURSE. I AM SORRY IT WAS THE MOON.'") }
+            : { title: 'MOONLINK CORE', detail: tracker.act >= 5 ? 'IT HUMS QUIETLY' : 'LOCKED. THE LIGHT FOLLOWS YOU AROUND THE ROOM.', ok: false },
+        )
+        continue
+      }
+      if (s.kind === 'dish' && tracker.act >= 5 && !tracker.truths.includes('dish')) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] LISTEN TO THE DISH', detail: 'IT IS RECEIVING SOMETHING', ok: true, run: () => tracker.findTruth('dish', "AN OLD REPORT, LOOPING: 'ALL KESTREL PASSENGERS SHOW ADAPTATION. THEY ARE NOT SICK. THEY ARE WHAT COMES NEXT. SEND THEM FAR AWAY. DO NOT LET THEM COME HOME.'") }))
+        continue
+      }
+      if (s.kind === 'anvil') {
+        consider(s.x, s.z, s.radius, 3.5, () => this.anvilInteraction())
         continue
       }
       if (s.kind === 'workbench') {
@@ -1372,7 +2102,7 @@ export class Game {
       }))
     }
 
-    if (candidates.length === 0) return this.blockInteraction() ?? this.freeBuildInteraction() ?? this.eatInteraction()
+    if (candidates.length === 0) return this.rigInteraction() ?? this.blockInteraction() ?? this.kitInteraction() ?? this.freeBuildInteraction() ?? this.eatInteraction()
     candidates.sort((a, b) => a.gap - b.gap)
     return candidates[0].make()
   }
@@ -1417,7 +2147,7 @@ export class Game {
     if (tier === 0) return
     this.player.actionTime = 0.3
     this.player.swingTier = tier
-    b.hp -= tier >= 2 ? 2 : 1
+    b.hp -= tier >= 3 ? 3 : tier >= 2 ? 2 : 1
     b.shake = 0.25
     this.spawnBurst(b.x, b.z, b.height * 0.6, tier >= 2 ? 7 : 5, tier >= 2 ? '#c9a6ff' : '#9aa0c0', 3)
     if (b.hp > 0) {
@@ -1428,7 +2158,7 @@ export class Game {
     this.sound('break')
     this.spawnBurst(b.x, b.z, b.height * 0.5, 16, tier >= 2 ? '#e2e5f2' : '#c9cbe0', 6)
     this.tracker.collect('moon-rock', tier >= 2 ? 3 : 2)
-    if (tier >= 2 && !this.onSurface && Math.random() < 0.25) this.tracker.collect('rare-ore', 1)
+    if (tier >= 2 && this.scene === 'cave' && Math.random() < (tier >= 3 ? 0.45 : 0.25)) this.tracker.collect('rare-ore', 1)
     if (this.onSurface) {
       const roll = Math.random()
       if (roll < 0.1) this.tracker.collect('titanium-ore', 1)
@@ -1488,15 +2218,15 @@ export class Game {
     return this.slots[this.hotbar.selected] ?? null
   }
 
-  private heldTier(): 0 | 1 | 2 {
+  private heldTier(): 0 | 1 | 2 | 3 {
     const held = this.heldItem()
-    return held === 'moon-pickaxe' ? 2 : held === 'pickaxe' ? 1 : 0
+    return held === 'titan-pickaxe' ? 3 : held === 'moon-pickaxe' ? 2 : held === 'pickaxe' ? 1 : 0
   }
 
   private inventoryItems(): HotbarItem[] {
     const owned = this.tracker.itemOrder.filter((item) => this.tracker.count(item) > 0)
     // Tools and gear come first so the equipped pickaxe stays in the hotbar.
-    const gear: ItemId[] = ['pickaxe', 'moon-pickaxe', 'power-drill', 'armor-plating', 'blaster']
+    const gear: ItemId[] = ['pickaxe', 'moon-pickaxe', 'titan-pickaxe', 'power-drill', 'armor-plating', 'blaster']
     const ordered = [...gear.filter((item) => owned.includes(item)), ...owned.filter((item) => !gear.includes(item))]
     return ordered.map((item) => ({ item, count: this.tracker.count(item) }))
   }
@@ -1506,6 +2236,11 @@ export class Game {
   }
 
   private render(): void {
+    if (this.finale) {
+      this.text.begin()
+      this.finale.draw(this.ctx, this.text)
+      return
+    }
     if (!this.cutscene.done) {
       this.text.begin()
       this.cutscene.draw(this.ctx, this.text)
@@ -1552,7 +2287,7 @@ export class Game {
     }
     for (const g of world.gardens) {
       const pos = cam.toCamera(g.x, g.z)
-      if (pos.rz + g.radius > 1 && Math.hypot(pos.rx, pos.rz) - g.radius < HORIZON_D) decals.push({ kind: 'garden', pos, radius: g.radius, depth: pos.rz })
+      if (pos.rz + g.radius > 1 && Math.hypot(pos.rx, pos.rz) - g.radius < HORIZON_D) decals.push({ kind: 'garden', pos, radius: g.radius, depth: pos.rz, farm: !!g.farm })
     }
     for (const b of world.boulders) if (!b.broken) addShadow(b.x, b.z, b.r * 1.3)
     if (surface) for (const c of this.creatures) addShadow(c.x, c.z, 1.1)
@@ -1576,8 +2311,8 @@ export class Game {
         ctx.globalAlpha = 1
       }
       else if (d.kind === 'garden') {
-        fillPolygon(ctx, '#3a5a5c', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius, 0, 18)))
-        fillPolygon(ctx, '#3f6e5e', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius * 0.7, 0, 16)))
+        fillPolygon(ctx, d.farm ? '#5a4a3e' : '#3a5a5c', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius, 0, 18)))
+        fillPolygon(ctx, d.farm ? '#6a5442' : '#3f6e5e', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius * 0.7, 0, 16)))
       }
       else {
         const [ox, oz] = cam.rotate(-0.25 * d.radius, -0.25 * d.radius)
@@ -1586,9 +2321,11 @@ export class Game {
     }
 
     const uprights: Upright[] = []
+    const cutaway = this.scene === 'arena' ? cam.toCamera(player.x, player.z).rz : -Infinity
     for (const boulder of world.boulders) {
       if (boulder.broken) continue
       const pos = cam.toCamera(boulder.x, boulder.z)
+      if (pos.rz < cutaway) continue
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -20 && p.sx < SCREEN_W + 20) uprights.push({ kind: 'boulder', boulder, p })
     }
@@ -1610,6 +2347,20 @@ export class Game {
       const pos = cam.toCamera(cx, cz)
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -40 && p.sx < SCREEN_W + 40) uprights.push({ kind: 'blocks', col, x: cx, z: cz, p })
+    }
+    if (this.scene === 'arena' && this.boss) {
+      const b = this.boss
+      const pos = cam.toCamera(b.x, b.z)
+      const p = cam.projectPoint(pos.rx, pos.rz)
+      if (p) uprights.push({ kind: 'boss', boss: b, p })
+      for (const ring of b.rings) {
+        for (let i = 0; i < 64; i++) {
+          const a = (i / 64) * Math.PI * 2
+          const c = cam.toCamera(b.x + Math.cos(a) * ring.r, b.z + Math.sin(a) * ring.r)
+          const rp = cam.projectPoint(c.rx, c.rz)
+          if (rp) rect(ctx, i % 2 ? '#c9a6ff' : '#efe3ff', rp.sx - 1, rp.sy - 1, 2, 2)
+        }
+      }
     }
     const ghost = !this.tablet.visible && !this.inventory.visible && this.deadTimer <= 0 ? this.blockTarget() : null
     if (ghost) {
@@ -1675,6 +2426,7 @@ export class Game {
       else if (u.kind === 'enemy') drawEnemy(ctx, u.enemy, u.p.sx, u.p.sy, this.time)
       else if (u.kind === 'wreck') drawWreck(ctx, u.wreck, u.p.sx, u.p.sy, u.p.scale, this.time)
       else if (u.kind === 'plant') drawPlant(ctx, u.plant, u.p.sx, u.p.sy, u.p.scale, this.time)
+      else if (u.kind === 'boss') drawBoss(ctx, u.boss, u.p.sx, u.p.sy, u.p.scale, this.time)
       else if (u.kind === 'blocks') {
         this.model.begin({ x: u.x, z: u.z, yaw: 0 })
         this.model.draw(ctx, columnModel(u.col))
@@ -1693,6 +2445,16 @@ export class Game {
     }
     this.drawParticles()
     this.drawProjectiles()
+    if (this.boss) {
+      for (const o of this.boss.orbs) {
+        const c = cam.toCamera(o.x, o.z)
+        const s = cam.projectPoint(c.rx, c.rz)
+        if (!s) continue
+        const y = s.sy - o.y * s.scale
+        rect(ctx, '#5dcaa5', s.sx - 2, y - 2, 4, 4)
+        rect(ctx, '#ffffff', s.sx - 1, y - 1, 2, 2)
+      }
+    }
     if (inShip) drawShipLight(ctx, this.time)
     else if (!surface) {
       const pc = cam.toCamera(player.x, player.z)
@@ -1736,10 +2498,22 @@ export class Game {
         armor: this.tracker.hasItem('armor-plating'),
         blaster: this.tracker.hasItem('blaster'),
         integrity: this.wave.active ? this.wave.integrity : null,
+        attackLabel: this.wave.raid ? 'ROCKET UNDER ATTACK' : undefined,
         dead: this.deadTimer > 0,
         underground: !surface,
       },
     })
+    if (this.boss && this.scene === 'arena') {
+      const b = this.boss
+      const w = 120
+      const x = SCREEN_W / 2 - w / 2
+      ctx.fillStyle = 'rgba(6,5,24,.8)'
+      ctx.fillRect(x - 2, 40, w + 4, 14)
+      rect(ctx, '#2a1a3a', x, 48, w, 4)
+      rect(ctx, b.hitFlash > 0 ? '#ffffff' : '#c9a6ff', x, 48, (w * Math.max(0, b.hp)) / b.maxHp, 4)
+      this.text.text(b.name, SCREEN_W / 2, 41, '#efe3ff', { size: 5, align: 'center' })
+      if (bossVulnerable(b) && Math.floor(this.time * 4) % 2) this.text.text('NOW! STRIKE IT', SCREEN_W / 2, 56, '#fac775', { size: 5.5, align: 'center' })
+    }
     for (const l of this.labels) {
       this.text.text(l.name, l.x, l.y, '#fac775', { size: 4.8, align: 'center' })
       if (l.job) this.text.text(l.job, l.x, l.y + 5.5, '#9aa2cf', { size: 4, align: 'center', weight: 500 })

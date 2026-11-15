@@ -24,7 +24,7 @@ export interface Gear {
   armor: boolean
   blaster: boolean
   /** 0 = no pickaxe, 1 = pickaxe, 2 = moon pickaxe. */
-  pickaxe: 0 | 1 | 2
+  pickaxe: 0 | 1 | 2 | 3
   held?: ItemId | null
 }
 
@@ -52,7 +52,7 @@ export class Player {
   turn = 0
   jumpCooldown = 0
   actionTime = 0
-  swingTier: 0 | 1 | 2 = 1
+  swingTier: 0 | 1 | 2 | 3 = 1
   speedMult = 1
   events: PlayerEvent[] = []
 
@@ -136,7 +136,8 @@ export class Player {
     const slope = rise / run
     const boulder = boulderAt(world, nx, nz, 0.5)
     if (boulder && boulder.height > this.y + STEP_HEIGHT) return false
-    if (world.blocks.heightAt(nx, nz, 0.4) > this.y + STEP_HEIGHT) return false
+    const blockTop = world.blocks.heightAt(nx, nz, 0.4)
+    if (blockTop > 0 && blockTop > this.y + STEP_HEIGHT) return false
     const crater = craterAt(world, nx, nz)
     if (crater?.isPit && slope > MAX_PIT_SLOPE) return false
     const slow = 1 / (1 + slope * CLIMB_SLOWDOWN)
@@ -171,7 +172,7 @@ export class Player {
     const mining = this.actionTime > 0
     const tier = gear.pickaxe ?? 0
     const held = holdingTablet ? null : gear.held ?? null
-    const holdingPick = held === 'pickaxe' || held === 'moon-pickaxe'
+    const holdingPick = held === 'pickaxe' || held === 'moon-pickaxe' || held === 'titan-pickaxe'
     if (tier > 0 && !holdingPick && !air && !holdingTablet && !mining) {
       // pickaxe slung across the back
       rect(ctx, '#b07f2c', sx - 7, fy - 6, 1, 4)

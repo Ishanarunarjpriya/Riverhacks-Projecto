@@ -46,6 +46,7 @@ export function createShipWorld(): World {
   structures.push({ kind: 'locker', name: 'LOCKER A', x: -10, z: 10, radius: 1.2, mapColor: '#7c85b4', yaw: Math.PI / 2 })
   structures.push({ kind: 'locker', name: 'LOCKER B', x: 10, z: 20, radius: 1.2, mapColor: '#7c85b4', yaw: -Math.PI / 2 })
   structures.push({ kind: 'locker', name: 'LOCKER C', x: -10, z: 32, radius: 1.2, mapColor: '#7c85b4', yaw: Math.PI / 2 })
+  structures.push({ kind: 'core', name: 'MOONLINK CORE', x: 9, z: 3, radius: 1.2, mapColor: '#5dcaa5', yaw: -Math.PI / 2 })
   structures.push({ kind: 'debris', name: 'WRECKAGE', x: 4, z: 30, radius: 1.6, mapColor: '#4b5488', yaw: 0.7 })
   for (const [x, z] of [[-5, 16], [6, 8], [-3, 38], [8, 33]]) {
     structures.push({ kind: 'debris', name: 'DEBRIS', x, z, radius: 1.4, mapColor: '#4b5488', yaw: rng() * Math.PI })

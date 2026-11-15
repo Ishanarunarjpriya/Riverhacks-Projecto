@@ -19,6 +19,7 @@ export interface Garden {
   plants: Plant[]
   found: boolean
   regrow: number
+  farm?: boolean
 }
 
 export const GARDEN_COUNT = 2
@@ -26,6 +27,8 @@ export const GARDEN_RADIUS = 6
 export const GARDEN_FOOD = 4
 export const GARDEN_REGROW = 90
 export const GARDEN_FIND_RANGE = 16
+export const FARM_FOOD = 3
+export const FARM_REGROW = 60
 const MIN_SPAWN_DISTANCE = 160
 
 const CROPS: readonly ItemId[] = ['moon-berry', 'moon-berry', 'star-melon', 'star-melon', 'glow-cap']
@@ -53,11 +56,19 @@ export function makeGarden(id: number, x: number, z: number, rng: () => number =
   return { id, x, z, radius: GARDEN_RADIUS, plants, found: false, regrow: GARDEN_REGROW }
 }
 
+export function makeFarm(id: number, x: number, z: number): Garden {
+  const plants: Plant[] = []
+  for (let row = -1; row <= 1; row++) {
+    for (let i = -2; i <= 2; i++) plants.push({ x: x + i * 1.2, z: z + row * 2, phase: Math.random() * 10, kind: (row + 3) % 3 })
+  }
+  return { id, x, z, radius: 3.2, plants, found: true, regrow: FARM_REGROW, farm: true }
+}
+
 export function growCrop(garden: Garden, rng: () => number = Math.random): Pickup {
   const a = rng() * Math.PI * 2
   const r = 1 + Math.sqrt(rng()) * (garden.radius - 1.5)
   return {
-    item: CROPS[Math.floor(rng() * CROPS.length)],
+    item: garden.farm ? (rng() < 0.6 ? 'moon-berry' : 'star-melon') : CROPS[Math.floor(rng() * CROPS.length)],
     x: garden.x + Math.cos(a) * r,
     z: garden.z + Math.sin(a) * r,
     phase: rng() * 10,

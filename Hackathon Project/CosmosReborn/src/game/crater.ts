@@ -50,6 +50,11 @@ export function drawCrater(ctx: Ctx, cam: Camera, crater: Crater, pos: CamPos): 
   const floorR = r * CRATER_FLOOR_RATIO
   fillPolygon(ctx, '#3f4878', cam.projectPolygon(rings[BANDS]), clip)
   fillPolygon(ctx, '#5a63a0', cam.projectPolygon(ring(cx - sunX * floorR * 0.22, cz - sunZ * floorR * 0.22, floorR * 0.82, -crater.depth, segments)), clip)
+  if (crater.ice) {
+    fillPolygon(ctx, '#7fa8d8', cam.projectPolygon(ring(cx, cz, floorR * 0.95, -crater.depth, segments)), clip)
+    fillPolygon(ctx, (crater.iceLeft ?? 0) > 0 ? '#bfe4ff' : '#8fb0d0', cam.projectPolygon(ring(cx + sunX * floorR * 0.15, cz + sunZ * floorR * 0.15, floorR * 0.6, -crater.depth, segments)), clip)
+    return
+  }
   if (crater.isPit) {
     fillPolygon(ctx, '#6f79b3', cam.projectPolygon(ring(cx - sunX * floorR * 0.4, cz - sunZ * floorR * 0.4, floorR * 0.35, -crater.depth, segments)), clip)
   }

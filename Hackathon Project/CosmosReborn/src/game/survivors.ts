@@ -1,14 +1,15 @@
 import type { ItemId } from './items'
 import { rect, type Ctx } from './pixel'
 
-export type Job = 'GATHERER' | 'BUILDER' | 'RESEARCHER'
+export type Job = 'GATHERER' | 'BUILDER' | 'RESEARCHER' | 'FARMER'
 
-export const JOBS: readonly Job[] = ['GATHERER', 'BUILDER', 'RESEARCHER']
+export const JOBS: readonly Job[] = ['GATHERER', 'BUILDER', 'RESEARCHER', 'FARMER']
 
 export const JOB_OUTPUT: Record<Job, ItemId> = {
   GATHERER: 'moon-rock',
   BUILDER: 'metal-scrap',
   RESEARCHER: 'anomaly-shard',
+  FARMER: 'moon-berry',
 }
 
 export interface Survivor {
@@ -26,6 +27,9 @@ export interface Survivor {
   walkTime: number
   targetX: number
   targetZ: number
+  stray: boolean
+  recruited: boolean
+  armed?: boolean
 }
 
 export const TALK_RANGE = 3.6
@@ -37,8 +41,43 @@ const DEFS = [
   { name: 'LENA', hair: '#e2e5f2', suit: '#7fb2ff', x: 14, z: 47, line: 'DO YOU HEAR THE HUMMING TOO? IT GETS LOUDER WHEN THE EARTH IS UP.' },
 ]
 
+const STRAYS = [
+  { name: 'TOMAS', hair: '#7a4a2a', suit: '#c9a6ff', x: -110, z: 120, line: 'I HAVE BEEN WALKING FOR DAYS. OR YEARS. THE SUN NEVER MOVES RIGHT.' },
+  { name: 'ADA', hair: '#e8c070', suit: '#fac775', x: 190, z: 90, line: 'YOU HAVE FOOD? REAL FOOD? I WILL WORK FOR IT. I WILL WORK FOR ANYTHING.' },
+  { name: 'RIN', hair: '#1a1a2a', suit: '#ff8a7a', x: 120, z: 420, line: 'THE DRIFTERS FOLLOWED ME. I THINK THEY WERE KEEPING ME SAFE.' },
+  { name: 'SOL', hair: '#c96a4a', suit: '#9fe1cb', x: 470, z: 300, line: 'MY NAME TAG SAYS SOL. I AM CHOOSING TO BELIEVE IT.' },
+  { name: 'IVY', hair: '#3d2a1f', suit: '#7fcf6a', x: 600, z: 140, line: 'I DUG A HOLE TO SLEEP IN. THE HOLE WAS ALREADY THERE. SO WAS A PILLOW.' },
+  { name: 'BRAM', hair: '#9aa0b8', suit: '#e0884a', x: 380, z: 650, line: 'TEN YEARS. THEY SAID SIX MONTHS. IT HAS BEEN TEN YEARS.' },
+  { name: 'NOOR', hair: '#2a1f1a', suit: '#7fb2ff', x: 700, z: 420, line: 'IF I COME WITH YOU, DO I GET A BED? I MISS BEDS.' },
+]
+
+export const CIVILIANS_NEEDED = 8
+
+export function createStrays(): Survivor[] {
+  return STRAYS.map((d, i) => ({
+    name: d.name,
+    x: d.x,
+    z: d.z,
+    homeX: d.x,
+    homeZ: d.z,
+    hair: d.hair,
+    suit: d.suit,
+    line: d.line,
+    job: null,
+    talked: false,
+    phase: i * 1.3 + 0.5,
+    walkTime: 0,
+    targetX: d.x,
+    targetZ: d.z,
+    stray: true,
+    recruited: false,
+  }))
+}
+
 export function createSurvivors(): Survivor[] {
   return DEFS.map((d, i) => ({
+    stray: false,
+    recruited: true,
     name: d.name,
     x: d.x,
     z: d.z,
@@ -97,6 +136,11 @@ export function drawSurvivor(ctx: Ctx, s: Survivor, sx: number, sy: number): voi
   rect(ctx, s.suit, sx - 4, fy - 8, 8, 1)
   rect(ctx, '#d8d9e6', sx - 5, fy - 10, 1, 4)
   rect(ctx, '#d8d9e6', sx + 4, fy - 10, 1, 4)
+  if (s.armed) {
+    rect(ctx, '#9aa2cf', sx - 5, fy - 11, 2, 2)
+    rect(ctx, '#9aa2cf', sx + 3, fy - 11, 2, 2)
+    rect(ctx, '#e0884a', sx - 4, fy - 6, 8, 1)
+  }
   rect(ctx, '#c98a5a', sx - 1, fy - 12, 2, 1)
   rect(ctx, '#c98a5a', sx - 3, fy - 16, 6, 4)
   rect(ctx, s.hair, sx - 3, fy - 17, 6, 2)
