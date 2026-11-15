@@ -410,14 +410,14 @@ export class Game {
   /** Listens for the tablet's A.I. app opening/closing; emits its screen rect in game pixels. */
   subscribeAssistantScreen(listener: (rect: ScreenRect | null) => void): () => void {
     this.aiListeners.add(listener)
-    listener(this.tablet.aiScreenRect())
+    listener(this.tablet.aiScreenRect(this.time))
     return () => {
       this.aiListeners.delete(listener)
     }
   }
 
   private syncAssistantScreen(): void {
-    const rect = this.tablet.aiScreenRect()
+    const rect = this.tablet.aiScreenRect(this.time)
     const key = rect ? `${rect.x}:${rect.y}:${rect.w}:${rect.h}` : ''
     if (key === this.aiScreenKey) return
     this.aiScreenKey = key

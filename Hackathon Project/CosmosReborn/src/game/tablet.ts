@@ -90,11 +90,10 @@ export class Tablet {
    * Screen area used by the A.I. app, in game pixels, or null when it is not on screen.
    * The HTML assistant panel is positioned over this rect, just under the tablet title.
    */
-  aiScreenRect(): ScreenRect | null {
+  aiScreenRect(time: number): ScreenRect | null {
     if (!this.open || !this.ready || this.screen !== 'ai') return null
-    const TX = (SCREEN_W - TW) / 2
-    const SY = 22 + 10
-    return { x: TX + 10, y: SY + 11, w: TW - 20, h: TH - 20 - 11 }
+    const { SX, SY, SW, SH } = this.layout(time)
+    return { x: SX, y: SY + 11, w: SW, h: SH - 11 }
   }
 
   handleKey(code: string): boolean {
