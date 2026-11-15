@@ -1,6 +1,7 @@
 import { ANOMALIES } from './anomalies'
 import { BASE_CENTER, BASE_RADIUS } from './base'
 import { WORLD_SIZE } from './constants'
+import { GARDEN_FOOD, createGardens, growCrop, type Garden } from './garden'
 import { createRng, wrap } from './math'
 import { createPickups, type Pickup } from './pickups'
 import { STRUCTURES, type Structure } from './structures'
@@ -36,6 +37,7 @@ export interface World {
   boulders: Boulder[]
   structures: Structure[]
   pickups: Pickup[]
+  gardens: Garden[]
 }
 
 export const CRATER_FLOOR_RATIO = 0.7
@@ -84,13 +86,21 @@ export function createWorld(seed = 11): World {
   }
   for (let i = 0; i < 260; i++) addBoulder(rng() * WORLD_SIZE, rng() * WORLD_SIZE)
 
+  const gardens = createGardens(rng, (x, z, margin) =>
+    tooClose(x, z, margin) ||
+    craters.some((c) => dist(x, z, c.x, c.z) < c.r + margin) ||
+    boulders.some((b) => dist(x, z, b.x, b.z) < b.r + margin),
+  )
+
   const pickups = createPickups(rng, craters, (x, z, margin) =>
     structures.some((s) => dist(x, z, s.x, s.z) < s.radius + margin) ||
     dist(x, z, BASE_CENTER.x, BASE_CENTER.z) < BASE_RADIUS + margin ||
     boulders.some((b) => dist(x, z, b.x, b.z) < b.r + margin),
   )
 
-  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups }
+  for (const g of gardens) for (let i = 0; i < GARDEN_FOOD; i++) pickups.push(growCrop(g, rng))
+
+  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens }
 }
 
 export function craterAt(world: World, x: number, z: number): Crater | null {

@@ -13,6 +13,11 @@ export type ItemId =
   | 'power-drill'
   | 'armor-plating'
   | 'blaster'
+  | 'moon-berry'
+  | 'star-melon'
+  | 'glow-cap'
+  | 'iron-ore'
+  | 'titanium-ore'
 
 export interface ItemInfo {
   name: string
@@ -36,6 +41,13 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   'power-drill': { name: 'POWER DRILL', short: 'DRILL', color: '#fac775', description: 'Cuts through hatches, rock and probably bone.' },
   'armor-plating': { name: 'ARMOR PLATING', short: 'ARMOR', color: '#9aa2cf', description: 'Reduces damage taken by 40%.' },
   'blaster': { name: 'BLASTER', short: 'BLASTER', color: '#ff8a7a', description: 'Press Q or click to fire. Aims at the nearest threat ahead.' },
+  'moon-berry': { name: 'MOON BERRY', short: 'BERRY', color: '#ff6b7a', description: 'Hold it and press E to eat. Heals 15.' },
+  'star-melon': { name: 'STAR MELON', short: 'MELON', color: '#ffb35a', description: 'Sweet and cold. Hold it and press E to eat. Heals 30.' },
+  'glow-cap': { name: 'GLOW CAP', short: 'GLOW CAP', color: '#5fe0c8', description: 'A shining mushroom. Hold it and press E to eat. Heals 60.' },
+  'iron-ore': { name: 'IRON ORE', short: 'IRON', color: '#c08a64', description: 'Rusty lunar iron. Sometimes drops from boulders.' },
+  'titanium-ore': { name: 'TITANIUM ORE', short: 'TITANIUM', color: '#a9c3d6', description: 'Rare, light and strong. Sometimes drops from boulders.' },
 }
+
+export const FOOD: Partial<Record<ItemId, number>> = { 'moon-berry': 15, 'star-melon': 30, 'glow-cap': 60 }
 
 export const SUPPLY_ITEMS: readonly ItemId[] = ['power-cell', 'ration-pack', 'repair-kit']

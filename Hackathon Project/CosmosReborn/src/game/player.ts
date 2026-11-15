@@ -10,6 +10,7 @@ import {
   WALK_SPEED,
 } from './constants'
 import { rect, type Ctx } from './pixel'
+import type { ItemId } from './items'
 import { boulderAt, craterAt, groundHeightAt, isSolidAt, type World } from './world'
 
 export interface Controls {
@@ -24,6 +25,7 @@ export interface Gear {
   blaster: boolean
   /** 0 = no pickaxe, 1 = pickaxe, 2 = moon pickaxe. */
   pickaxe: 0 | 1 | 2
+  held?: ItemId | null
 }
 
 export const NO_CONTROLS: Controls = { forward: 0, turn: 0, jump: false, fire: false }
@@ -167,7 +169,9 @@ export class Player {
 
     const mining = this.actionTime > 0
     const tier = gear.pickaxe ?? 0
-    if (tier > 0 && !air && !holdingTablet && !mining) {
+    const held = holdingTablet ? null : gear.held ?? null
+    const holdingPick = held === 'pickaxe' || held === 'moon-pickaxe'
+    if (tier > 0 && !holdingPick && !air && !holdingTablet && !mining) {
       // pickaxe slung across the back
       rect(ctx, '#b07f2c', sx - 7, fy - 6, 1, 4)
       rect(ctx, '#8a5a1e', sx - 8, fy - 4, 1, 2)
@@ -196,6 +200,16 @@ export class Player {
         if (swingTier >= 2) rect(ctx, '#c9a6ff', sx + (up ? 3 : 5), fy - (up ? 17 : 8), 1, 1)
       } else {
         rect(ctx, SUIT_SHADE, sx + 4, fy - 10 - swing, 1, 4)
+        if (holdingPick) {
+          const moon = held === 'moon-pickaxe'
+          rect(ctx, '#b07f2c', sx + 5, fy - 10 - swing, 1, 4)
+          rect(ctx, moon ? '#232447' : '#c9cbe0', sx + 4, fy - 11 - swing, 3, 1)
+          rect(ctx, moon ? '#c9a6ff' : '#e6e6ee', sx + 6, fy - 11 - swing, 1, 1)
+        } else if (held === 'power-drill') {
+          rect(ctx, '#e0a23a', sx + 4, fy - 8 - swing, 3, 2)
+          rect(ctx, '#3f4878', sx + 4, fy - 6 - swing, 1, 2)
+          rect(ctx, '#c9cbe0', sx + 7, fy - 8 - swing, 1, 1)
+        }
       }
     }
 

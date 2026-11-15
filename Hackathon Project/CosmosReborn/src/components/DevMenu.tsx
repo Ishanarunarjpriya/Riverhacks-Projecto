@@ -89,6 +89,12 @@ export default function DevMenu({ game, onClose }: Props) {
       <Section title="Items">
         <Button label="Give resources" onClick={act('Resources added', () => game.devGiveResources())} />
         <Button label="Give all gear" onClick={act('Gear added', () => game.devGiveGear())} />
+        <Button label="Give food & ores" onClick={act('Food & ores added', () => game.devGiveFood())} />
+      </Section>
+
+      <Section title="Gardens">
+        <Button label="Plant garden ahead" onClick={act('Garden', () => game.devSpawnGarden())} />
+        <Button label="Regrow all gardens" onClick={act('Gardens', () => game.devGrowGardens())} />
       </Section>
 
       <Section title="Combat">

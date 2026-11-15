@@ -25,13 +25,14 @@ import {
 } from './combat'
 import { HORIZON_D, SCREEN_H, SCREEN_W, SHOW_MINIMAP } from './constants'
 import { drawCrater } from './crater'
+import { GARDEN_FIND_RANGE, GARDEN_FOOD, GARDEN_REGROW, drawPlant, growCrop, makeGarden, type Garden, type Plant } from './garden'
 import { SCAN_RANGE, createCreatures, drawCreature, speciesNote, updateCreatures, type Creature } from './creatures'
 import { Cutscene } from './cutscene'
 import { Hotbar, HOTBAR_SLOTS, type HotbarItem } from './hotbar'
 import { drawHud, type Prompt } from './hud'
 import { Input } from './input'
-import { InventoryScreen } from './inventory'
-import { ITEMS, type ItemId } from './items'
+import { INVENTORY_SLOTS, InventoryScreen } from './inventory'
+import { FOOD, ITEMS, type ItemId } from './items'
 import { createRng, wrap, type CamPt } from './math'
 import { box, ModelRenderer } from './model3d'
 import { PICKUP_RADIUS, drawPickup, type Pickup } from './pickups'
@@ -60,6 +61,7 @@ type Decal =
   | { kind: 'pebble'; p: ScreenPoint; depth: number }
   | { kind: 'shadow'; pos: CamPos; radius: number; depth: number }
   | { kind: 'pad'; depth: number }
+  | { kind: 'garden'; pos: CamPos; radius: number; depth: number }
 
 type Upright =
   | { kind: 'boulder'; boulder: Boulder; p: ScreenPoint }
@@ -71,6 +73,7 @@ type Upright =
   | { kind: 'survivor'; survivor: Survivor; p: ScreenPoint }
   | { kind: 'enemy'; enemy: Enemy; p: ScreenPoint }
   | { kind: 'wreck'; wreck: Wreck; p: ScreenPoint }
+  | { kind: 'plant'; plant: Plant; p: ScreenPoint }
 
 interface Interaction extends Prompt {
   run?: () => void
@@ -160,6 +163,7 @@ export class Game {
   private sinceHurt = 10
   private deadTimer = 0
   private mouseFire = false
+  private slots: (ItemId | null)[] = Array<ItemId | null>(INVENTORY_SLOTS + HOTBAR_SLOTS).fill(null)
   private firstAttackSpawned = false
   private wave = { started: false, active: false, integrity: 100, restartTimer: 0 }
   private fade = 0
@@ -234,6 +238,7 @@ export class Game {
     window.addEventListener('keydown', this.skipCutscene)
     canvas.addEventListener('pointermove', this.handlePointerMove)
     canvas.addEventListener('pointerdown', this.handlePointerDown)
+    canvas.addEventListener('pointerup', this.handlePointerUp)
 
     this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
     if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI() } })
@@ -254,6 +259,7 @@ export class Game {
     window.removeEventListener('keydown', this.skipCutscene)
     this.canvas.removeEventListener('pointermove', this.handlePointerMove)
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
+    this.canvas.removeEventListener('pointerup', this.handlePointerUp)
   }
 
   private toGame(e: PointerEvent): [number, number] {
@@ -264,6 +270,15 @@ export class Game {
   private handlePointerMove = (e: PointerEvent) => {
     const [x, y] = this.toGame(e)
     this.inventory.pointer(x, y)
+  }
+
+  private handlePointerUp = (e: PointerEvent) => {
+    const [x, y] = this.toGame(e)
+    const move = this.inventory.pointerUp(x, y)
+    if (!move) return
+    const { from, to } = move
+    ;[this.slots[from], this.slots[to]] = [this.slots[to], this.slots[from]]
+    this.sound('select')
   }
 
   private get world() {
@@ -277,6 +292,10 @@ export class Game {
   private handlePointerDown = (e: PointerEvent) => {
     if (this.playing && !this.tablet.visible && !this.inventory.visible) this.mouseFire = true
     const [x, y] = this.toGame(e)
+    if (this.inventory.open && this.inventory.pointerDown(x, y, this.slotItems())) {
+      this.canvas.setPointerCapture?.(e.pointerId)
+      this.sound('select')
+    }
     if (this.tablet.open && this.tablet.click(x, y)) this.sound('select')
   }
 
@@ -322,6 +341,9 @@ export class Game {
     locs.push({ id: 'cave-spawn', label: 'Cave entrance', group: 'Cave', scene: 'cave', x: CAVE_SPAWN.x, z: CAVE_SPAWN.z, face: Math.PI })
     locs.push({ id: 'cave-ladder', label: 'Cave ladder', group: 'Cave', scene: 'cave', x: LADDER.x - 6, z: LADDER.z, face: Math.PI / 2 })
     locs.push({ id: 'cave-cavern', label: 'Hidden cavern', group: 'Cave', scene: 'cave', x: CAVERN.x - 12, z: CAVERN.z, face: Math.PI / 2 })
+    for (const g of this.surface.gardens) {
+      locs.push({ id: `garden-${g.id}`, label: `Garden ${g.id + 1}${g.found ? '' : ' (undiscovered)'}`, group: 'Gardens', scene: 'surface', x: g.x, z: g.z - g.radius - 8, face: 0 })
+    }
     const ore = this.caveWorld.pickups.find((p) => !p.collected)
     if (ore) locs.push({ id: 'cave-ore', label: 'Nearest glowing ore', group: 'Cave', scene: 'cave', x: ore.x - 3, z: ore.z, face: Math.PI / 2 })
     return locs
@@ -355,6 +377,32 @@ export class Game {
   devGiveGear(): void {
     const missing = (['pickaxe', 'power-drill', 'armor-plating', 'blaster'] as ItemId[]).filter((i) => !this.tracker.hasItem(i))
     this.tracker.devGive(Object.fromEntries(missing.map((i) => [i, 1])))
+  }
+
+  devGiveFood(): void {
+    this.tracker.devGive({ 'moon-berry': 5, 'star-melon': 3, 'glow-cap': 2, 'iron-ore': 5, 'titanium-ore': 3 })
+  }
+
+  devGrowGardens(): string {
+    let grown = 0
+    for (const g of this.surface.gardens) {
+      while (this.cropsIn(g) < GARDEN_FOOD) {
+        this.surface.pickups.push(growCrop(g))
+        grown++
+      }
+    }
+    return `${grown} crops grown`
+  }
+
+  devSpawnGarden(): string {
+    if (!this.onSurface) return 'go to the surface first'
+    const ahead = 14
+    const x = this.player.x + Math.sin(this.player.heading) * ahead
+    const z = this.player.z + Math.cos(this.player.heading) * ahead
+    const garden = makeGarden(this.surface.gardens.length, x, z)
+    this.surface.gardens.push(garden)
+    for (let i = 0; i < GARDEN_FOOD; i++) this.surface.pickups.push(growCrop(garden))
+    return `Garden ${garden.id + 1} planted ahead`
   }
 
   devHeal(): void {
@@ -634,12 +682,55 @@ export class Game {
 
     for (const b of this.world.boulders) b.shake = Math.max(0, b.shake - dt)
     this.updateParticles(dt)
+    this.updateGardens(dt)
 
     this.interaction = menu ? null : this.findInteraction()
     if (this.interactQueued) {
       this.interactQueued = false
       if (this.interaction?.run) this.interaction.run()
       else if (this.interaction) this.sound('deny')
+    }
+  }
+
+  private cropsIn(garden: Garden): number {
+    return this.surface.pickups.filter((p) => p.garden === garden.id && !p.collected).length
+  }
+
+  private updateGardens(dt: number): void {
+    const world = this.surface
+    for (const g of world.gardens) {
+      if (this.cropsIn(g) < GARDEN_FOOD) {
+        g.regrow -= dt
+        if (g.regrow <= 0) {
+          g.regrow = GARDEN_REGROW
+          world.pickups.push(growCrop(g))
+        }
+      }
+      if (!g.found && this.onSurface && this.distanceTo(g.x, g.z) < GARDEN_FIND_RANGE) {
+        g.found = true
+        this.tracker.toastMessage('A GARDEN... GROWING ON THE MOON?', '#5fe0c8')
+        this.sound('clue')
+      }
+    }
+    world.pickups = world.pickups.filter((p) => p.garden === undefined || !p.collected)
+  }
+
+  private eatInteraction(): Interaction | null {
+    const held = this.hotbarItems()[this.hotbar.selected]
+    const heal = held ? FOOD[held.item] : undefined
+    if (!held || !heal) return null
+    const name = ITEMS[held.item].name
+    if (this.hp >= PLAYER_MAX_HP) return { title: name, detail: 'HEALTH IS ALREADY FULL', ok: false }
+    return {
+      title: `[E] EAT ${name}`,
+      detail: `+${heal} HEALTH`,
+      ok: true,
+      run: () => {
+        if (!this.tracker.consume(held.item)) return
+        this.hp = Math.min(PLAYER_MAX_HP, this.hp + heal)
+        this.sound('pickup')
+        this.tracker.toastMessage(`ATE ${name}  +${heal} HEALTH`, ITEMS[held.item].color)
+      },
     }
   }
 
@@ -724,6 +815,7 @@ export class Game {
           this.turretCooldown = TURRET_COOLDOWN
           const shot = shoot(turret.x, turret.z, target.x, target.z, true, 0.05, turret.radius + 0.6)
           shot.y = 3.2
+          shot.pierce = true
           this.projectiles.push(shot)
           if (this.distanceTo(turret.x, turret.z) < 70) this.sound('turret')
         }
@@ -731,13 +823,19 @@ export class Game {
     }
 
     if (fire && this.fireCooldown <= 0) {
-      if (tracker.hasItem('blaster')) {
+      if (this.heldItem() === 'blaster') {
         this.fireCooldown = BLASTER_COOLDOWN
         const target = this.onSurface ? pickTarget(this.enemies, player.x, player.z, player.heading) : null
         const tx = target ? target.x : player.x + Math.sin(player.heading) * 30
         const tz = target ? target.z : player.z + Math.cos(player.heading) * 30
-        this.projectiles.push(shoot(player.x, player.z, tx, tz, true))
+        const shot = shoot(player.x, player.z, tx, tz, true)
+        shot.y = player.y + 1.6
+        this.projectiles.push(shot)
         this.sound('shoot')
+      } else if (tracker.hasItem('blaster')) {
+        this.fireCooldown = 1
+        this.tracker.toastMessage('HOLD THE BLASTER TO FIRE', '#ff8a7a')
+        this.sound('deny')
       } else if (this.enemies.length > 0) {
         this.fireCooldown = 1
         this.sound('deny')
@@ -753,6 +851,8 @@ export class Game {
         else this.killEnemy(hit.enemy)
       } else if (hit.player && !p.friendly && this.onSurface) {
         this.damagePlayer(ENEMY_DAMAGE)
+      } else if (hit.wall) {
+        this.spawnBurst(p.x, p.z, p.y, 4, p.friendly ? '#9fe1cb' : '#ff8a7a', 2)
       }
     })
     this.enemies = this.enemies.filter((e) => e.hp > 0)
@@ -980,9 +1080,11 @@ export class Game {
     for (const b of world.boulders) {
       if (b.broken || b.hp > 3) continue
       consider(b.x, b.z, b.r, MINE_RANGE, () =>
-        tracker.hasPickaxe()
+        this.heldTier() > 0
           ? { title: '[E] MINE BOULDER', detail: `${b.hp} ${b.hp === 1 ? 'HIT' : 'HITS'} LEFT`, ok: true, run: () => this.mine(b) }
-          : { title: 'BOULDER', detail: 'CRAFT A PICKAXE TO MINE IT', ok: false },
+          : tracker.hasPickaxe()
+            ? { title: 'BOULDER', detail: 'HOLD YOUR PICKAXE TO MINE IT', ok: false }
+            : { title: 'BOULDER', detail: 'CRAFT A PICKAXE TO MINE IT', ok: false },
       )
     }
 
@@ -991,13 +1093,13 @@ export class Game {
         consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] CLIMB UP', detail: 'BACK TO THE SURFACE', ok: true, run: () => this.exitCave() }))
         continue
       }
-      if (s.kind === 'hatch' && tracker.hasItem('power-drill')) {
-        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({
-          title: tracker.caveReached ? '[E] CLIMB DOWN' : '[E] DRILL OPEN THE HATCH',
-          detail: 'INTO THE CAVES',
-          ok: true,
-          run: () => this.enterCave(),
-        }))
+      if (s.kind === 'hatch' && (tracker.caveReached || tracker.hasItem('power-drill'))) {
+        const ready = tracker.caveReached || this.heldItem() === 'power-drill'
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () =>
+          ready
+            ? { title: tracker.caveReached ? '[E] CLIMB DOWN' : '[E] DRILL OPEN THE HATCH', detail: 'INTO THE CAVES', ok: true, run: () => this.enterCave() }
+            : { title: 'SEALED HATCH', detail: 'HOLD THE POWER DRILL TO OPEN IT', ok: false },
+        )
         continue
       }
       const info = INSPECTIONS[s.kind]
@@ -1016,7 +1118,7 @@ export class Game {
       }))
     }
 
-    if (candidates.length === 0) return null
+    if (candidates.length === 0) return this.eatInteraction()
     candidates.sort((a, b) => a.gap - b.gap)
     return candidates[0].make()
   }
@@ -1052,7 +1154,7 @@ export class Game {
   }
 
   private mine(b: Boulder): void {
-    const tier = this.tracker.toolTier()
+    const tier = this.heldTier()
     if (tier === 0) return
     this.player.actionTime = 0.3
     this.player.swingTier = tier
@@ -1068,6 +1170,11 @@ export class Game {
     this.spawnBurst(b.x, b.z, b.height * 0.5, 16, tier >= 2 ? '#e2e5f2' : '#c9cbe0', 6)
     this.tracker.collect('moon-rock', tier >= 2 ? 3 : 2)
     if (tier >= 2 && !this.onSurface && Math.random() < 0.25) this.tracker.collect('rare-ore', 1)
+    if (this.onSurface) {
+      const roll = Math.random()
+      if (roll < 0.1) this.tracker.collect('titanium-ore', 1)
+      else if (roll < 0.35) this.tracker.collect('iron-ore', 1)
+    }
     this.tracker.mineBoulder()
   }
 
@@ -1099,6 +1206,34 @@ export class Game {
     this.particles = this.particles.filter((p) => p.life > 0)
   }
 
+  private syncSlots(): void {
+    const { tracker, slots } = this
+    for (let i = 0; i < slots.length; i++) {
+      const item = slots[i]
+      if (item && tracker.count(item) <= 0) slots[i] = null
+    }
+    for (const { item } of this.inventoryItems()) {
+      if (slots.includes(item)) continue
+      const free = slots.indexOf(null)
+      if (free >= 0) slots[free] = item
+    }
+  }
+
+  private slotItems(): (HotbarItem | undefined)[] {
+    this.syncSlots()
+    return this.slots.map((item) => (item ? { item, count: this.tracker.count(item) } : undefined))
+  }
+
+  private heldItem(): ItemId | null {
+    this.syncSlots()
+    return this.slots[this.hotbar.selected] ?? null
+  }
+
+  private heldTier(): 0 | 1 | 2 {
+    const held = this.heldItem()
+    return held === 'moon-pickaxe' ? 2 : held === 'pickaxe' ? 1 : 0
+  }
+
   private inventoryItems(): HotbarItem[] {
     const owned = this.tracker.itemOrder.filter((item) => this.tracker.count(item) > 0)
     // Tools and gear come first so the equipped pickaxe stays in the hotbar.
@@ -1107,8 +1242,8 @@ export class Game {
     return ordered.map((item) => ({ item, count: this.tracker.count(item) }))
   }
 
-  private hotbarItems(): HotbarItem[] {
-    return this.inventoryItems().slice(0, HOTBAR_SLOTS)
+  private hotbarItems(): (HotbarItem | undefined)[] {
+    return this.slotItems().slice(0, HOTBAR_SLOTS)
   }
 
   private render(): void {
@@ -1146,6 +1281,10 @@ export class Game {
       }
     }
     for (const s of world.structures) addShadow(s.x, s.z, s.radius * 1.25)
+    for (const g of world.gardens) {
+      const pos = cam.toCamera(g.x, g.z)
+      if (pos.rz + g.radius > 1 && Math.hypot(pos.rx, pos.rz) - g.radius < HORIZON_D) decals.push({ kind: 'garden', pos, radius: g.radius, depth: pos.rz })
+    }
     for (const b of world.boulders) if (!b.broken) addShadow(b.x, b.z, b.r * 1.3)
     if (surface) for (const c of this.creatures) addShadow(c.x, c.z, 1.1)
     if (surface) for (const s of this.survivors) addShadow(s.x, s.z, 0.9)
@@ -1160,6 +1299,10 @@ export class Game {
       if (d.kind === 'crater') drawCrater(ctx, cam, d.crater, d.pos)
       else if (d.kind === 'pebble') rect(ctx, d.p.scale > 4 ? '#6f78a8' : '#848dbb', d.p.sx, d.p.sy, d.p.scale > 5 ? 2 : 1, 1)
       else if (d.kind === 'pad') this.drawBasePad()
+      else if (d.kind === 'garden') {
+        fillPolygon(ctx, '#3a5a5c', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius, 0, 18)))
+        fillPolygon(ctx, '#3f6e5e', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius * 0.7, 0, 16)))
+      }
       else {
         const [ox, oz] = cam.rotate(-0.25 * d.radius, -0.25 * d.radius)
         fillPolygon(ctx, '#5b6496', cam.projectPolygon(ring(d.pos.rx + ox, d.pos.rz + oz, d.radius, 0, 14)))
@@ -1183,6 +1326,14 @@ export class Game {
       const pos = cam.toCamera(pickup.x, pickup.z)
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -10 && p.sx < SCREEN_W + 10) uprights.push({ kind: 'pickup', pickup, p })
+    }
+    for (const g of world.gardens) {
+      if (Math.hypot(wrap(g.x - player.x), wrap(g.z - player.z)) > HORIZON_D + g.radius) continue
+      for (const plant of g.plants) {
+        const pos = cam.toCamera(plant.x, plant.z)
+        const p = cam.projectPoint(pos.rx, pos.rz)
+        if (p && p.sx > -10 && p.sx < SCREEN_W + 10) uprights.push({ kind: 'plant', plant, p })
+      }
     }
     if (surface) {
     for (const creature of this.creatures) {
@@ -1232,6 +1383,7 @@ export class Game {
       }
       else if (u.kind === 'enemy') drawEnemy(ctx, u.enemy, u.p.sx, u.p.sy, this.time)
       else if (u.kind === 'wreck') drawWreck(ctx, u.wreck, u.p.sx, u.p.sy, u.p.scale, this.time)
+      else if (u.kind === 'plant') drawPlant(ctx, u.plant, u.p.sx, u.p.sy, u.p.scale, this.time)
       else this.drawPlayer(u.p, u.pos)
       if (u.kind === 'pickup' && u.pickup.item === 'rare-ore') this.glows.push({ x: u.p.sx, y: u.p.sy - u.p.scale, color: '#ffd28a' })
       if (u.kind === 'structure' && (u.structure.kind === 'cavern' || u.structure.kind === 'ladder')) {
@@ -1295,7 +1447,7 @@ export class Game {
     this.tablet.draw(ctx, this.time, view)
     this.tablet.drawText(this.text, this.time, view)
     this.inventory.drawBackdrop(ctx)
-    this.inventory.draw(this.text, this.inventoryItems(), this.hotbar.selected)
+    this.inventory.draw(this.text, this.slotItems(), this.hotbar.selected)
   }
 
   private drawProjectiles(): void {
@@ -1401,7 +1553,7 @@ export class Game {
     const [ox, oz] = cam.rotate(-0.5, -0.5)
     fillPolygon(ctx, '#2e3560', cam.projectPolygon(ring(pos.rx + ox, pos.rz + oz, 1.2 - Math.min(0.6, lift * 0.12), ground, 14)))
 
-    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.tracker.hasItem('blaster'), pickaxe: this.tracker.toolTier() })
+    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.heldItem() === 'blaster', pickaxe: this.tracker.toolTier(), held: this.heldItem() })
     if (sunk) ctx.restore()
   }
 }

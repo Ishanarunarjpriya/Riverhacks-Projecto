@@ -13,6 +13,7 @@ export interface Pickup {
   phase: number
   collected: boolean
   clue?: Clue
+  garden?: number
 }
 
 export const PICKUP_RADIUS = 3.2
@@ -58,6 +59,9 @@ export function createPickups(
   scatter('metal-scrap', 8, 0, 60, 10, 45)
   scatter('metal-scrap', 10, 540, 350, 8, 30)
   anywhere('metal-scrap', 8)
+
+  anywhere('iron-ore', 10)
+  anywhere('titanium-ore', 4)
 
   for (const clue of CLUES) place('data-log', clue.x, clue.z, clue)
 

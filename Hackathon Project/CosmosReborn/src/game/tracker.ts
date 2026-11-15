@@ -409,6 +409,12 @@ export class QuestTracker {
     }
   }
 
+  consume(item: ItemId): boolean {
+    if (this.count(item) <= 0) return false
+    this.inventory[item] = this.count(item) - 1
+    return true
+  }
+
   devGive(items: Partial<Record<ItemId, number>>): void {
     for (const [item, n] of Object.entries(items) as [ItemId, number][]) this.add(item, n)
   }

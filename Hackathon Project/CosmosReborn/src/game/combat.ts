@@ -1,6 +1,6 @@
 import { wrap } from './math'
 import { rect, type Ctx } from './pixel'
-import { isSolidAt, type World } from './world'
+import { boulderAt, isSolidAt, type World } from './world'
 
 export interface Enemy {
   id: number
@@ -24,6 +24,7 @@ export interface Projectile {
   vz: number
   life: number
   friendly: boolean
+  pierce?: boolean
 }
 
 export interface Wreck {
@@ -141,6 +142,7 @@ export function updateEnemies(enemies: Enemy[], dt: number, ctx: EnemyContext, o
 export interface HitResult {
   enemy: Enemy | null
   player: boolean
+  wall?: boolean
 }
 
 export function updateProjectiles(projectiles: Projectile[], dt: number, enemies: Enemy[], playerX: number, playerZ: number, world: World, onHit: (p: Projectile, r: HitResult) => void): Projectile[] {
@@ -149,8 +151,9 @@ export function updateProjectiles(projectiles: Projectile[], dt: number, enemies
     p.z += p.vz * dt
     p.life -= dt
     if (p.life <= 0) continue
-    if (!p.friendly && isSolidAt(world, p.x, p.z)) {
+    if (!p.pierce && (isSolidAt(world, p.x, p.z) || (boulderAt(world, p.x, p.z)?.height ?? -1) > p.y)) {
       p.life = 0
+      onHit(p, { enemy: null, player: false, wall: true })
       continue
     }
     if (p.friendly) {

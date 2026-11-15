@@ -76,7 +76,7 @@ function paint(g: Ctx, rows: readonly string[], palette: Record<string, string>)
   })
 }
 
-const ICON_DRAWERS: Record<ItemId, (g: Ctx) => void> = {
+const ICON_DRAWERS: Partial<Record<ItemId, (g: Ctx) => void>> = {
   'moon-rock': (g) => {
     ellipse(g, '#6c719a', 6, 7, 5, 4)
     ellipse(g, '#9aa0c0', 5, 6, 4, 3)
@@ -174,10 +174,17 @@ const ITEM_PNGS: readonly ItemId[] = [
   'ration-pack',
   'metal-scrap',
   'pickaxe',
+  'moon-pickaxe',
+  'moon-rock',
+  'moon-berry',
+  'star-melon',
+  'glow-cap',
+  'iron-ore',
+  'titanium-ore',
 ]
 
 export const ICONS = Object.fromEntries(
-  (Object.keys(ICON_DRAWERS) as ItemId[]).map((id) => [id, makeSprite(12, 12, ICON_DRAWERS[id])]),
+  (Object.keys(ITEMS) as ItemId[]).map((id) => [id, makeSprite(12, 12, ICON_DRAWERS[id] ?? (() => {}))]),
 ) as Record<ItemId, HTMLCanvasElement>
 
 export const HAS_ITEM_PNG = new Set<ItemId>()
@@ -230,7 +237,7 @@ export class Hotbar {
     this.selected = next
   }
 
-  draw(text: TextLayer, items: HotbarItem[], time: number): void {
+  draw(text: TextLayer, items: (HotbarItem | undefined)[], time: number): void {
     if (!this.base || !this.tile) return
     const x0 = HOTBAR_X
     const y0 = HOTBAR_Y

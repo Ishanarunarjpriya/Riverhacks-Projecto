@@ -59,7 +59,7 @@ export function createCaveWorld(seed = 23): World {
   }
 
   const pebbles = Array.from({ length: 900 }, () => ({ x: rng() * WORLD_SIZE, z: rng() * WORLD_SIZE }))
-  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups }
+  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens: [] }
 }
 
 export const CAVE_GROUND = { rim: '#5a4a6e', rim2: '#463a5c', band: '#2c2440', base: '#3a3150' }

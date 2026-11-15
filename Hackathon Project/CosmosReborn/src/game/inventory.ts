@@ -40,6 +40,7 @@ export class InventoryScreen {
   private t = 0
   private img: HTMLImageElement | null = null
   private mouse: { x: number; y: number } | null = null
+  private dragFrom: number | null = null
 
   constructor() {
     const img = new Image()
@@ -63,6 +64,33 @@ export class InventoryScreen {
 
   close(): void {
     this.open = false
+    this.dragFrom = null
+  }
+
+  private slotAt(x: number, y: number): number | null {
+    const hit = (rect: SlotRect) => x >= rect.x - 1 && x < rect.x + rect.size + 1 && y >= rect.y - 1 && y < rect.y + rect.size + 1
+    for (let c = 0; c < HOTBAR_SLOTS; c++) if (hit(slotRect(c, HOTBAR_ROW))) return c
+    for (let r = 0; r < GRID_ROWS.length; r++) {
+      for (let c = 0; c < SLOT_COLUMNS.length; c++) if (hit(slotRect(c, GRID_ROWS[r]))) return HOTBAR_SLOTS + r * SLOT_COLUMNS.length + c
+    }
+    return null
+  }
+
+  pointerDown(x: number, y: number, slots: (HotbarItem | undefined)[]): boolean {
+    if (!this.open || this.t < 1) return false
+    const slot = this.slotAt(x, y)
+    if (slot === null || !slots[slot]) return false
+    this.dragFrom = slot
+    this.mouse = { x, y }
+    return true
+  }
+
+  pointerUp(x: number, y: number): { from: number; to: number } | null {
+    const from = this.dragFrom
+    this.dragFrom = null
+    if (from === null || !this.open) return null
+    const to = this.slotAt(x, y)
+    return to === null || to === from ? null : { from, to }
   }
 
   pointer(x: number, y: number): void {
@@ -79,7 +107,7 @@ export class InventoryScreen {
     ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
   }
 
-  draw(text: TextLayer, items: HotbarItem[], selected: number): void {
+  draw(text: TextLayer, items: (HotbarItem | undefined)[], selected: number): void {
     if (this.t <= 0 || !this.img) return
     const ease = 1 - (1 - this.t) ** 3
     const offset = (1 - ease) * 18
@@ -88,7 +116,9 @@ export class InventoryScreen {
     text.image(this.img, 0, 0, IMG_W, IMG_H, PANEL_X, PANEL_Y + offset, PANEL_W, PANEL_H)
 
     let hovered: HotbarItem | null = null
-    const drawSlot = (rect: SlotRect, entry: HotbarItem | undefined, highlight: boolean) => {
+    const drawSlot = (rect: SlotRect, index: number, highlight: boolean) => {
+      const entry = items[index]
+      const dragging = this.dragFrom === index
       const y = rect.y + offset
       if (highlight) {
         text.rect('#fac775', rect.x - 0.5, y - 0.5, rect.size + 1, 0.5)
@@ -100,16 +130,21 @@ export class InventoryScreen {
       const over = m && m.x >= rect.x && m.x < rect.x + rect.size && m.y >= y && m.y < y + rect.size
       if (over) text.rect('rgba(255,255,255,0.12)', rect.x, y, rect.size, rect.size)
       if (!entry) return
-      if (over) hovered = entry
+      if (over && this.dragFrom === null) hovered = entry
+      if (dragging) text.alpha = ease * 0.3
       const c = rect.x + rect.size / 2
       drawItemIcon(text, entry.item, c - 5.5, y + rect.size / 2 - 5.5, 11)
       if (entry.count > 1) text.text(String(entry.count), rect.x + rect.size - 0.5, y + rect.size - 5, '#ffffff', { size: 4.5, align: 'right', weight: 700 })
+      text.alpha = ease
     }
 
     GRID_ROWS.forEach((rowY, r) => {
-      SLOT_COLUMNS.forEach((_, c) => drawSlot(slotRect(c, rowY), items[r * SLOT_COLUMNS.length + c], false))
+      SLOT_COLUMNS.forEach((_, c) => drawSlot(slotRect(c, rowY), HOTBAR_SLOTS + r * SLOT_COLUMNS.length + c, false))
     })
-    for (let c = 0; c < HOTBAR_SLOTS; c++) drawSlot(slotRect(c, HOTBAR_ROW), items[c], c === selected)
+    for (let c = 0; c < HOTBAR_SLOTS; c++) drawSlot(slotRect(c, HOTBAR_ROW), c, c === selected)
+
+    const carried = this.dragFrom !== null ? items[this.dragFrom] : undefined
+    if (carried && this.mouse) drawItemIcon(text, carried.item, this.mouse.x - 6, this.mouse.y - 6, 12)
 
     const tip = hovered as HotbarItem | null
     if (tip) {

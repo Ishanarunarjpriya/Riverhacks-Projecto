@@ -31,7 +31,7 @@ export interface HudState {
   player: Player
   tracker: QuestTracker
   hotbar: Hotbar
-  hotbarItems: HotbarItem[]
+  hotbarItems: (HotbarItem | undefined)[]
   time: number
   showPitWarning: boolean
   prompt: Prompt | null
