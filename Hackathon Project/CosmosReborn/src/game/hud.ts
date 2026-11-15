@@ -1,11 +1,13 @@
 import { HATCH } from './anomalies'
 import { BASE_CENTER } from './base'
 import { SCREEN_CX, SCREEN_W, WORLD_SIZE } from './constants'
+import { howTo } from './howto'
 import { HOTBAR_X, HOTBAR_Y, Hotbar, type HotbarItem } from './hotbar'
 import { clamp, wrap, wrapPositive } from './math'
 import { rect, type Ctx } from './pixel'
 import type { Player } from './player'
-import { roman } from './tracker'
+import { roman, TOAST_LIFE, TRANSMISSION_LIFE } from './tracker'
+import { typingFrame } from './typing'
 import type { TextLayer, TextStyle } from './text'
 import type { Message, QuestTracker } from './tracker'
 import type { World } from './world'
@@ -39,16 +41,17 @@ export interface HudState {
   muted: boolean
   combat: CombatHud
   showMinimap: boolean
+  waypoint?: { x: number; z: number; label: string } | null
+  food?: { meals: number; eaters: number; next: number; hungry: number } | null
 }
 
 const PANEL = 'rgba(6,5,24,.75)'
 const LINE = 8
 
 export function drawHud(ctx: Ctx, text: TextLayer, hud: HudState): void {
-  drawQuestPanel(ctx, text, hud.tracker)
-  drawCompass(ctx, text, hud.world, hud.player, hud.tracker)
+  drawQuestPanel(ctx, text, hud.tracker, hud.player, hud.waypoint ?? null)
+  drawCompass(ctx, text, hud.world, hud.player, hud.tracker, hud.waypoint ?? null)
   if (hud.showMinimap) drawMinimap(ctx, hud.world, hud.player)
-  drawToasts(ctx, text, hud.tracker)
   if (hud.prompt) drawPrompt(ctx, text, hud.prompt)
   if (hud.showPitWarning && Math.floor(hud.time * 3) % 2) {
     ctx.fillStyle = 'rgba(6,5,24,.8)'
@@ -57,44 +60,56 @@ export function drawHud(ctx: Ctx, text: TextLayer, hud: HudState): void {
   }
   hud.hotbar.draw(text, hud.hotbarItems, hud.time)
   drawCombat(ctx, text, hud.combat, hud.time)
+  if (hud.food) drawFood(ctx, text, hud.food, hud.time)
   if (hud.muted) text.text('MUTED', SCREEN_W - 6, 172, '#5b6496', { size: 4.5, align: 'right' })
   drawCards(ctx, text, hud.tracker)
-  drawTransmission(ctx, text, hud.tracker)
+  const top = drawTransmission(ctx, text, hud.tracker, hud.showMinimap ? 82 : 60)
+  drawToasts(ctx, text, hud.tracker, top)
 }
 
-function drawQuestPanel(ctx: Ctx, text: TextLayer, tracker: QuestTracker): void {
+function drawQuestPanel(ctx: Ctx, text: TextLayer, tracker: QuestTracker, player: Player, waypoint: { x: number; z: number; label: string } | null): void {
   const quest = tracker.activeQuest
-  const rows: { text: string; right?: string; color: string; style?: TextStyle }[] = []
+  const rows: { text: string; right?: string; color: string; style?: TextStyle; tight?: boolean }[] = []
   if (quest) {
+    const progress = tracker.progress(quest)
+    const step = progress.findIndex((o) => !o.done)
+    const current = progress[step < 0 ? progress.length - 1 : step]
     rows.push({ text: `ACT ${roman(quest.act)} · ${quest.title.toUpperCase()}`, color: '#fac775', style: { size: 6.5 } })
-    for (const o of tracker.progress(quest)) {
-      rows.push({
-        text: `${o.done ? '✓' : '·'} ${o.label}`,
-        right: o.target > 1 ? `${o.current}/${o.target}` : undefined,
-        color: o.done ? '#5dcaa5' : '#d9dcef',
-        style: { size: 6, weight: 500 },
-      })
+    rows.push({
+      text: `▸ ${current.label}`,
+      right: current.target > 1 ? `${current.current}/${current.target}` : progress.length > 1 ? `STEP ${Math.max(0, step) + 1}/${progress.length}` : undefined,
+      color: '#e8ecff',
+      style: { size: 6, weight: 500 },
+    })
+    const objective = quest.objectives[step < 0 ? quest.objectives.length - 1 : step]
+    if (objective && step >= 0) {
+      const style: TextStyle = { size: 4.8, weight: 500 }
+      for (const line of wrapText(text, howTo(objective), 128, style).slice(0, 2)) rows.push({ text: line, color: '#9fe1cb', style, tight: true })
+    }
+    if (waypoint) {
+      const d = Math.round(Math.hypot(wrap(waypoint.x - player.x), wrap(waypoint.z - player.z)))
+      rows.push({ text: `◆ ${waypoint.label}`, right: `${d}m`, color: '#fac775', style: { size: 5.5, weight: 500 } })
     }
   } else {
     rows.push({ text: `ACT ${roman(tracker.lastCompletedAct)} COMPLETE`, color: '#fac775', style: { size: 6.5 } })
-    rows.push({ text: 'More acts coming soon', color: '#9aa2cf', style: { size: 6, weight: 500 } })
+    rows.push({ text: 'The story is complete', color: '#9aa2cf', style: { size: 6, weight: 500 } })
   }
-  for (const q of tracker.openOptionalQuests) {
-    const p = tracker.progress(q)[0]
-    rows.push({ text: `◇ ${q.title}`, right: `${p.current}/${p.target}`, color: '#8e96c4', style: { size: 6, weight: 500 } })
-  }
+  const side = tracker.openOptionalQuests.length
+  if (side > 0) rows.push({ text: `◇ ${side} side quest${side > 1 ? 's' : ''} · TAB › QUESTS`, color: '#8e96c4', style: { size: 5, weight: 500 } })
 
   const width = 138
+  const heights = rows.map((r) => (r.tight ? 6 : LINE))
   ctx.fillStyle = PANEL
-  ctx.fillRect(4, 4, width, 6 + rows.length * LINE)
+  ctx.fillRect(4, 4, width, 6 + heights.reduce((a, b) => a + b, 0))
+  let y = 7
   rows.forEach((row, i) => {
-    const y = 7 + i * LINE
     text.text(row.text, 8, y, row.color, row.style)
     if (row.right) text.text(row.right, width, y, row.color, { ...row.style, align: 'right' })
+    y += heights[i]
   })
 }
 
-function drawCompass(ctx: Ctx, text: TextLayer, world: World, player: Player, tracker: QuestTracker): void {
+function drawCompass(ctx: Ctx, text: TextLayer, world: World, player: Player, tracker: QuestTracker, waypoint: { x: number; z: number; label: string } | null): void {
   const W = 116
   const X = SCREEN_W - 4 - W
   const Y = 4
@@ -130,6 +145,20 @@ function drawCompass(ctx: Ctx, text: TextLayer, world: World, player: Player, tr
       rect(ctx, '#efe3ff', sxm, Y + 2, 1, 1)
     }
   }
+  if (waypoint) {
+    const wb = (Math.atan2(wrap(waypoint.x - player.x), wrap(waypoint.z - player.z)) * 180) / Math.PI
+    const rel = ((((wb - headingDeg) % 360) + 540) % 360) - 180
+    const wx = cx + (Math.max(-span, Math.min(span, rel)) / span) * (W / 2 - 4)
+    const edge = Math.abs(rel) > span
+    ctx.fillStyle = '#fac775'
+    ctx.beginPath()
+    ctx.moveTo(wx, Y + 3)
+    ctx.lineTo(wx + 3, Y + 7)
+    ctx.lineTo(wx, Y + 11)
+    ctx.lineTo(wx - 3, Y + 7)
+    ctx.fill()
+    if (edge) text.text(rel > 0 ? '▶' : '◀', wx + (rel > 0 ? -7 : 7), Y + 3.5, '#fac775', { size: 5, align: 'center' })
+  }
   rect(ctx, '#ffffff', cx, Y, 1, 2)
   rect(ctx, '#ffffff', cx, Y + H - 2, 1, 2)
 
@@ -154,6 +183,19 @@ function drawCompass(ctx: Ctx, text: TextLayer, world: World, player: Player, tr
   ctx.fillStyle = PANEL
   ctx.fillRect(SCREEN_W - 4 - rw, Y + H + 12, rw, 8)
   text.text(region, SCREEN_W - 8, Y + H + 13.2, '#9aa2cf', { size: 5, align: 'right' })
+}
+
+function drawFood(ctx: Ctx, text: TextLayer, f: { meals: number; eaters: number; next: number; hungry: number }, time: number): void {
+  const x = HOTBAR_X - 58
+  const y = HOTBAR_Y - 4
+  const short = f.meals < f.eaters
+  const flash = (short || f.hungry > 0) && Math.floor(time * 2) % 2 === 0
+  ctx.fillStyle = PANEL
+  ctx.fillRect(x, y, 54, 9)
+  const m = Math.floor(f.next / 60)
+  const sec = Math.floor(f.next % 60).toString().padStart(2, '0')
+  text.text(`FOOD ${f.meals}/${f.eaters}`, x + 3, y + 1.6, flash ? '#ff8a7a' : short ? '#fac775' : '#7fcf6a', { size: 4.6 })
+  text.text(`${m}:${sec}`, x + 51, y + 1.6, '#9aa2cf', { size: 4.2, align: 'right' })
 }
 
 function drawCombat(ctx: Ctx, text: TextLayer, c: CombatHud, time: number): void {
@@ -185,26 +227,30 @@ function drawCombat(ctx: Ctx, text: TextLayer, c: CombatHud, time: number): void
   if (c.dead) text.text('YOU BLACKED OUT', SCREEN_CX, 80, '#ff8a7a', { size: 10, align: 'center' })
 }
 
-function drawToasts(ctx: Ctx, text: TextLayer, tracker: QuestTracker): void {
+function drawToasts(ctx: Ctx, text: TextLayer, tracker: QuestTracker, top: number): void {
   const now = tracker.time
-  const life = 4.5
-  const toasts = tracker.messages.filter((m) => m.kind === 'toast' && now >= m.born && now - m.born < life).slice(-4)
+  const life = TOAST_LIFE
+  const toasts = tracker.messages.filter((m) => m.kind === 'toast' && now >= m.born && now - m.born < life).slice(-1)
   const style: TextStyle = { size: 5.5, weight: 500 }
-  let y = 152
+  const bottom = 124
+  let y = top + 2
   for (let i = toasts.length - 1; i >= 0; i--) {
     const m = toasts[i]
     const age = now - m.born
-    const fade = Math.min(1, (life - age) / 0.8)
-    const slide = (1 - clamp(age / 0.2, 0, 1)) * -20
-    const lines = wrapText(text, m.text, 104, style)
-    y -= lines.length * 6.5 + 3
-    const w = Math.max(...lines.map((l) => text.measure(l, style))) + 8
+    const fade = Math.min(1, (life - age) / 0.5)
+    const slide = (1 - clamp(age / 0.2, 0, 1)) * 20
+    const lines = wrapText(text, m.text, 88, style)
+    if (y + lines.length * 6.5 > bottom) break
+    const w = 96
+    const x = SCREEN_W - 4 - w + slide
     ctx.fillStyle = `rgba(6,5,24,${0.75 * fade})`
-    ctx.fillRect(4 + slide, y - 2, w, lines.length * 6.5 + 2)
+    ctx.fillRect(x, y - 2, w, lines.length * 6.5 + 2)
+    rect(ctx, m.color, x + w - 1, y - 2, 1, lines.length * 6.5 + 2)
     const saved = text.alpha
     text.alpha = saved * fade
-    lines.forEach((l, k) => text.text(l, 8 + slide, y + k * 6.5 - 0.5, m.color, style))
+    lines.forEach((l, k) => text.text(l, x + 4, y + k * 6.5 - 0.5, m.color, style))
     text.alpha = saved
+    y += lines.length * 6.5 + 3
   }
 }
 
@@ -225,20 +271,20 @@ function drawCards(ctx: Ctx, text: TextLayer, tracker: QuestTracker): void {
   if (quest) drawQuestCard(ctx, text, quest, now - quest.born)
 }
 
-function drawTransmission(ctx: Ctx, text: TextLayer, tracker: QuestTracker): void {
+function drawTransmission(ctx: Ctx, text: TextLayer, tracker: QuestTracker, y: number): number {
   const now = tracker.time
-  const life = 7
+  const life = TRANSMISSION_LIFE
   const m = tracker.messages.find((msg) => msg.kind === 'transmission' && now >= msg.born && now - msg.born < life)
-  if (!m) return
+  if (!m) return y
   const age = now - m.born
   const fade = clamp((life - age) / 0.6, 0, 1) * clamp(age / 0.25, 0, 1)
-  const W = 200
-  const x = SCREEN_CX - W / 2
+  const W = 96
+  const x = SCREEN_W - 4 - W + (1 - clamp(age / 0.25, 0, 1)) * 24
   const style: TextStyle = { size: 5.5, weight: 500 }
   const reveal = Math.floor(clamp((age - 0.4) * 40, 0, m.detail.length))
   const lines = wrapText(text, m.detail, W - 16, style)
   const H = 14 + lines.length * 7
-  const y = 92
+  if (age >= 0.4 && reveal < m.detail.length) typingFrame()
   ctx.fillStyle = `rgba(20,10,36,${0.88 * fade})`
   ctx.fillRect(x, y, W, H)
   ctx.globalAlpha = fade
@@ -266,6 +312,7 @@ function drawTransmission(ctx: Ctx, text: TextLayer, tracker: QuestTracker): voi
     text.text(shown, x + 6 + jitter, y + 11 + i * 7, '#c8fff0', style)
   })
   text.alpha = saved
+  return y + H + 3
 }
 
 const GLITCH_CHARS = '#%&@$/\\|<>?!01'
@@ -321,7 +368,7 @@ function drawQuestCard(ctx: Ctx, text: TextLayer, m: Message, age: number): void
   const slide = 1 - (1 - clamp(age / 0.35, 0, 1)) ** 3
   const fade = clamp((4.5 - age) / 0.5, 0, 1)
   const W = 168
-  const x = SCREEN_CX - W / 2
+  const x = Math.min(SCREEN_CX - W / 2, SCREEN_W - 106 - W)
   const y = 50 - (1 - slide) * 30
   const summary = wrapText(text, m.detail, W - 16, { size: 5.5, weight: 500 })
   const H = 22 + summary.length * 7

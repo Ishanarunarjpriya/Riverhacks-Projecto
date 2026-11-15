@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 import { answerAssist } from './server/assist.js'
+import { speak } from './server/tts.js'
 
 /**
  * Dev/preview only. In production the same handler is served by server.js, so the
@@ -11,6 +12,17 @@ function geminiAssistant(env) {
 
   const middleware = async (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
+    if (url.pathname === '/api/tts') {
+      const result = await speak({ text: url.searchParams.get('text'), voice: url.searchParams.get('voice'), key: env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY })
+      if (result.audio) {
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'audio/mpeg')
+        return res.end(result.audio)
+      }
+      res.statusCode = result.status
+      res.setHeader('Content-Type', 'application/json')
+      return res.end(JSON.stringify(result.json))
+    }
     if (url.pathname !== '/api/assist') return next()
 
     const send = (status, body) => {

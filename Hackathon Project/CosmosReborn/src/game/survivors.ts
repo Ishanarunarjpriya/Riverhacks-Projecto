@@ -30,10 +30,16 @@ export interface Survivor {
   stray: boolean
   recruited: boolean
   armed?: boolean
+  hunger?: number
 }
 
 export const TALK_RANGE = 3.6
 export const PRODUCTION_INTERVAL = 12
+/** Seconds of play per settlement day. Every civilian eats one meal from the food bin each day. */
+export const FOOD_DAY = 75
+/** Days in a row without a meal before a civilian starves. */
+export const STARVE_DAYS = 3
+export const FOOD_BIN = { x: 15, z: 21 } as const
 
 const DEFS = [
   { name: 'MAYA', hair: '#d9a066', suit: '#e0884a', x: 1, z: 17, line: "I WOKE UP IN A CRATER. I DON'T REMEMBER LANDING. I DON'T REMEMBER LEAVING." },

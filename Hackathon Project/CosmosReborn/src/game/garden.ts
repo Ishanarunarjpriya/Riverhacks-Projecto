@@ -22,14 +22,14 @@ export interface Garden {
   farm?: boolean
 }
 
-export const GARDEN_COUNT = 2
+export const GARDEN_COUNT = 6
 export const GARDEN_RADIUS = 6
 export const GARDEN_FOOD = 4
 export const GARDEN_REGROW = 90
 export const GARDEN_FIND_RANGE = 16
 export const FARM_FOOD = 3
 export const FARM_REGROW = 60
-const MIN_SPAWN_DISTANCE = 160
+const MIN_SPAWN_DISTANCE = 110
 
 const CROPS: readonly ItemId[] = ['moon-berry', 'moon-berry', 'star-melon', 'star-melon', 'glow-cap']
 
@@ -40,7 +40,7 @@ export function createGardens(rng: () => number, blocked: (x: number, z: number,
     const z = rng() * WORLD_SIZE
     if (Math.hypot(wrap(x), wrap(z)) < MIN_SPAWN_DISTANCE) continue
     if (blocked(x, z, GARDEN_RADIUS + 4)) continue
-    if (gardens.some((g) => Math.hypot(wrap(x - g.x), wrap(z - g.z)) < WORLD_SIZE / 3)) continue
+    if (gardens.some((g) => Math.hypot(wrap(x - g.x), wrap(z - g.z)) < WORLD_SIZE / 5)) continue
     gardens.push(makeGarden(gardens.length, x, z, rng))
   }
   return gardens

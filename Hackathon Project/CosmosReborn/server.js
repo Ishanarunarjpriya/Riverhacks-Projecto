@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { answerAssist } from './server/assist.js'
+import { speak } from './server/tts.js'
 
 /**
  * Production host for Cosmos Reborn: serves the built game from dist/ and the
@@ -78,6 +79,21 @@ const server = createServer(async (req, res) => {
       key: API_KEY,
     })
     return json(res, status, body)
+  }
+
+  if (url.pathname === '/api/tts') {
+    if (req.method !== 'GET') return json(res, 405, { error: 'USE GET' })
+    const result = await speak({
+      text: url.searchParams.get('text'),
+      voice: url.searchParams.get('voice'),
+      key: process.env.ELEVENLABS_API_KEY,
+      ip: String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'unknown').split(',')[0],
+    })
+    if (result.audio) {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'public, max-age=604800' })
+      return res.end(result.audio)
+    }
+    return json(res, result.status, result.json)
   }
 
   if (url.pathname === '/healthz') return json(res, 200, { ok: true })

@@ -26,6 +26,7 @@ export interface Gear {
   /** 0 = no pickaxe, 1 = pickaxe, 2 = moon pickaxe. */
   pickaxe: 0 | 1 | 2 | 3
   held?: ItemId | null
+  heldIcon?: CanvasImageSource | null
 }
 
 export const NO_CONTROLS: Controls = { forward: 0, turn: 0, jump: false, fire: false }
@@ -207,10 +208,11 @@ export class Player {
           rect(ctx, '#b07f2c', sx + 5, fy - 10 - swing, 1, 4)
           rect(ctx, moon ? '#232447' : '#c9cbe0', sx + 4, fy - 11 - swing, 3, 1)
           rect(ctx, moon ? '#c9a6ff' : '#e6e6ee', sx + 6, fy - 11 - swing, 1, 1)
-        } else if (held === 'power-drill') {
-          rect(ctx, '#e0a23a', sx + 4, fy - 8 - swing, 3, 2)
-          rect(ctx, '#3f4878', sx + 4, fy - 6 - swing, 1, 2)
-          rect(ctx, '#c9cbe0', sx + 7, fy - 8 - swing, 1, 1)
+        } else if ((held === 'power-drill' || held === 'blaster') && gear.heldIcon) {
+          const prev = ctx.imageSmoothingEnabled
+          ctx.imageSmoothingEnabled = false
+          ctx.drawImage(gear.heldIcon, Math.round(sx + 2), Math.round(fy - 13 - swing), 9, 9)
+          ctx.imageSmoothingEnabled = prev
         }
       }
     }
@@ -222,7 +224,7 @@ export class Player {
       rect(ctx, '#9aa2cf', sx + 3, fy - 11, 2, 2)
       rect(ctx, '#e0884a', sx - 4, fy - 6, 8, 1)
     }
-    if (gear.blaster && !holdingTablet && !mining && !air) {
+    if (gear.blaster && !gear.heldIcon && !holdingTablet && !mining && !air) {
       rect(ctx, '#3f4878', sx + 4, fy - 8, 3, 2)
       rect(ctx, '#ff8a7a', sx + 6, fy - 8, 1, 1)
     }

@@ -92,7 +92,8 @@ export function drawPickup(ctx: Ctx, pickup: Pickup, sx: number, sy: number, s: 
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(icon, Math.round(sx - size / 2), Math.round(sy - size - 0.2 * s + bob), size, size)
     ctx.imageSmoothingEnabled = prev
-    if (SUPPLY_ITEMS.includes(pickup.item) && blink) rect(ctx, '#fac775', sx - 1, sy - size - 0.2 * s - 3, 2, 2)
+    const beacon = SUPPLY_ITEMS.includes(pickup.item) || pickup.item === 'data-log' || pickup.item === 'rocket-part' || pickup.item === 'ice-miner' || pickup.item === 'anvil'
+    if (beacon && blink) rect(ctx, pickup.item === 'data-log' ? '#5dcaa5' : '#fac775', sx - 1, sy - size - 0.2 * s - 3, 2, 2)
     else if (glint) rect(ctx, '#ffffff', sx + size * 0.25, sy - size * 0.8, 1, 1)
     return
   }

@@ -36,6 +36,7 @@ export type StructureKind =
   | 'terminal'
   | 'icerig'
   | 'core'
+  | 'foodbin'
 
 export interface Structure {
   kind: StructureKind
@@ -202,6 +203,14 @@ function buildModel(kind: StructureKind, time: number): Part[] {
         box(-0.6, 0.6, 0.5, 2.2, 5.2, 5.25, '#3f4878'),
       ]
     }
+    case 'foodbin':
+      return [
+        box(-1.4, 1.4, 0, 1.6, -1, 1, '#7a5420', '#a8742a'),
+        box(-1.45, 1.45, 0.6, 0.85, -1.05, 1.05, '#5a3f2a'),
+        box(-1.2, -0.3, 1.6, 2.1, -0.7, 0.2, '#ff6b7a', '#ff9aa6'),
+        box(-0.1, 0.9, 1.6, 2.2, -0.5, 0.6, '#7fcf6a', '#a8e08a'),
+        box(0.4, 1.1, 1.6, 1.95, -0.8, -0.2, '#ffb35a'),
+      ]
     case 'storage':
       return [
         box(-2.2, 2.2, 0, 3, -2.2, 2.2, '#7c85b4', '#9aa2cf'),
@@ -282,10 +291,10 @@ function buildModel(kind: StructureKind, time: number): Part[] {
       ]
     case 'bulkhead':
       return [
-        box(-3.05, 3.05, 0, 8, -0.35, 0.35, '#3a4062', '#4b5488'),
-        box(-3.06, 3.06, 2.4, 2.8, -0.36, 0.36, '#e0884a'),
-        box(-2.6, -2.2, 0.2, 7.6, -0.4, 0.4, '#2a2f4c'),
-        glowBox(-0.4, 0.4, 6.6, 7, -0.42, 0.42, blink ? '#e24b4a' : '#4a1f2a'),
+        { faces: [{ pts: [[-3, 0, 0], [3, 0, 0], [3, 8, 0], [-3, 8, 0]], color: '#3a4062', backColor: '#3a4062', glow: true }], stacked: true },
+        { faces: [{ pts: [[-3, 2.4, 0], [3, 2.4, 0], [3, 2.8, 0], [-3, 2.8, 0]], color: '#e0884a', backColor: '#e0884a', glow: true }], stacked: true },
+        { faces: [{ pts: [[-2.6, 0.2, 0], [-2.2, 0.2, 0], [-2.2, 7.6, 0], [-2.6, 7.6, 0]], color: '#2a2f4c', backColor: '#2a2f4c', glow: true }], stacked: true },
+        { faces: [{ pts: [[-0.4, 6.6, 0], [0.4, 6.6, 0], [0.4, 7, 0], [-0.4, 7, 0]], color: blink ? '#e24b4a' : '#4a1f2a', backColor: blink ? '#e24b4a' : '#4a1f2a', glow: true }], stacked: true },
       ]
     case 'locker':
       return [

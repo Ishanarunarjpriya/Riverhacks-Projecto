@@ -1,3 +1,4 @@
+import { setTypingOutput } from './typing'
 export type SoundName =
   | 'step'
   | 'jump'
@@ -25,6 +26,7 @@ export type SoundName =
   | 'enemyDie'
   | 'turret'
   | 'warning'
+  | 'helmetCrack'
 
 const PENTATONIC = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33]
 
@@ -59,6 +61,7 @@ export class GameAudio {
     const data = this.noise.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
     this.startDrone()
+    setTypingOutput(ctx, this.sfx)
   }
 
   close(): void {
@@ -83,6 +86,39 @@ export class GameAudio {
       this.tone(f, 2.8, 'sine', 0.12, 0, this.music)
       this.tone(f * 2.01, 1.6, 'sine', 0.03, 0.02, this.music)
     }
+  }
+
+  private clips = new Map<string, Promise<AudioBuffer | null>>()
+
+  /** Fetches and decodes a recorded clip once so it can play instantly later. */
+  preloadClip(url: string): void {
+    const ctx = this.ctx
+    if (!ctx || this.clips.has(url)) return
+    this.clips.set(
+      url,
+      fetch(url)
+        .then((res) => res.arrayBuffer())
+        .then((data) => ctx.decodeAudioData(data))
+        .catch(() => null),
+    )
+  }
+
+  /** Plays a recorded clip (a voice line) through the game's audio, so mute applies to it. */
+  playClip(url: string, volume = 1): void {
+    const ctx = this.ctx
+    if (!ctx || !this.sfx) return
+    this.preloadClip(url)
+    const out = this.sfx
+    void this.clips.get(url)?.then((buffer) => {
+      if (!buffer) return
+      const node = ctx.createBufferSource()
+      node.buffer = buffer
+      const gain = ctx.createGain()
+      gain.gain.value = volume / 0.7
+      node.connect(gain)
+      gain.connect(out)
+      node.start()
+    })
   }
 
   play(name: SoundName): void {
@@ -172,6 +208,19 @@ export class GameAudio {
       case 'warning':
         for (let i = 0; i < 3; i++) this.tone(520, 0.12, 'square', 0.05, i * 0.2)
         break
+      case 'helmetCrack': {
+        // Glass splitting: three sharp snaps with glassy pings, then air hissing out.
+        const snap = (delay: number, pitch: number) => {
+          setTimeout(() => this.burst(0.05, 5200, 0.32, 'highpass'), delay * 1000)
+          this.tone(pitch, 0.09, 'triangle', 0.05, delay)
+          this.tone(pitch * 1.34, 0.07, 'sine', 0.035, delay + 0.01)
+        }
+        snap(0, 2600)
+        snap(0.13, 3100)
+        snap(0.3, 2200)
+        setTimeout(() => this.burst(1.3, 7000, 0.07, 'highpass'), 420)
+        break
+      }
       case 'crash':
         this.burst(1.4, 900, 0.5, 'lowpass')
         this.sweep(120, 30, 1.2, 'sine', 0.5)

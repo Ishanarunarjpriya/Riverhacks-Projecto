@@ -1,4 +1,5 @@
 import { SCREEN_CX, SCREEN_H } from './constants'
+import { ITEM_ART } from './itemart'
 import { ITEMS, type ItemId } from './items'
 import { ellipse, makeSprite, rect, type Ctx } from './pixel'
 import type { TextLayer } from './text'
@@ -275,13 +276,21 @@ const ITEM_PNGS: readonly ItemId[] = [
   'glow-cap',
   'iron-ore',
   'titanium-ore',
+  'crescent-shard',
+  'metal-rod',
+  'farm-kit',
+  'home-kit',
+  'alien-alloy',
 ]
 
 export const ICONS = Object.fromEntries(
-  (Object.keys(ITEMS) as ItemId[]).map((id) => [id, makeSprite(12, 12, ICON_DRAWERS[id] ?? (() => {}))]),
+  (Object.keys(ITEMS) as ItemId[]).map((id) => {
+    const art = ITEM_ART[id]
+    return [id, art ? makeSprite(32, 32, art) : makeSprite(12, 12, ICON_DRAWERS[id] ?? (() => {}))]
+  }),
 ) as Record<ItemId, HTMLCanvasElement>
 
-export const HAS_ITEM_PNG = new Set<ItemId>()
+export const HAS_ITEM_PNG = new Set<ItemId>(Object.keys(ITEM_ART) as ItemId[])
 
 for (const id of ITEM_PNGS) {
   const img = new Image()

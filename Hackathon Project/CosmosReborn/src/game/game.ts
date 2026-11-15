@@ -1,7 +1,9 @@
-import { ANOMALIES, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
+import { setTypingMuted } from './typing'
+import { ANOMALIES, ANOMALY_BEAM_RANGE, ANOMALY_INTRO, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
+import { SHIP_SPOT } from './quests'
 import { setAssistantContext } from './assistant'
 import { GameAudio, type SoundName } from './audio'
-import { ANVIL_RECIPES, BEDS_PER_HOME, HOUSING_BEDS, KIT_STRUCTURES, BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
+import { ANVIL_RECIPES, BEDS_PER_HOME, HOUSING_BEDS, KIT_STRUCTURES, PART_ITEMS, BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
 import { BLOCK, BLOCK_FOR_ITEM, BLOCK_INFO, BLOCK_REACH, MAX_STACK, cellCenter, cellOf, columnModel, ghostModel, type BlockColumn } from './blocks'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
 import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, TERMINAL, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
@@ -27,13 +29,15 @@ import {
 import { HORIZON_D, SCREEN_H, SCREEN_W, SHOW_MINIMAP } from './constants'
 import { drawCrater } from './crater'
 import { FARM_FOOD, FARM_REGROW, makeFarm, GARDEN_FIND_RANGE, GARDEN_FOOD, GARDEN_REGROW, drawPlant, growCrop, makeGarden, type Garden, type Plant } from './garden'
-import { SCAN_RANGE, createCreatures, drawCreature, speciesNote, updateCreatures, type Creature } from './creatures'
+import { SCAN_RANGE, SPECIES, createCreatures, drawCreature, mergeCreatures, speciesNote, speciesOf, surfaced, updateCreatures, type Creature } from './creatures'
 import { Cutscene } from './cutscene'
+import { setVoiceMuted, speak, toggleVoices, voiceForSpeaker } from './voice'
+import type { Message } from './tracker'
 import { Finale } from './finale'
 import { FUEL_GOAL, RIG_CAPACITY, RIG_INTERVAL, BLUEPRINTS, FOOD_STOCK_GOAL, PASSENGER_BAY_COST, RAID_INTERVAL, ROCKET_RANGE, SECTION_COST, SECTION_ORDER, rocket, type Blueprint } from './rocket'
 import { ARENA_SPAWN, BOSS_INFO, MELEE_RANGE, bossVulnerable, clampToArena, createArenaWorld, createBoss, drawBoss, updateBoss, type Boss } from './boss'
 import { SHIP_SPAWN, SHIP_WORKBENCH, WRECKAGE, clampToShip, createShipWorld, drawShipCeiling, drawShipLight, SHIP_GROUND } from './ship'
-import { Hotbar, HOTBAR_SLOTS, type HotbarItem } from './hotbar'
+import { HAS_ITEM_PNG, Hotbar, HOTBAR_SLOTS, ICONS, type HotbarItem } from './hotbar'
 import { drawHud, type Prompt } from './hud'
 import { Input } from './input'
 import { INVENTORY_SLOTS, InventoryScreen } from './inventory'
@@ -46,7 +50,7 @@ import { NO_CONTROLS, Player } from './player'
 import { REGIONS, regionAt } from './regions'
 import { Sky } from './sky'
 import { INSPECTIONS, STRUCTURES, drawStructure, type Structure } from './structures'
-import { Tablet, type ScreenRect, type TabletView } from './tablet'
+import { Tablet, type App, type ScreenRect, type TabletView } from './tablet'
 import {
   JOB_OUTPUT,
   PRODUCTION_INTERVAL,
@@ -57,6 +61,9 @@ import {
   nextJob,
   updateSurvivors,
   type Survivor,
+  FOOD_BIN,
+  FOOD_DAY,
+  STARVE_DAYS,
 } from './survivors'
 import { TextLayer } from './text'
 import { QuestTracker, type TrackerSnapshot } from './tracker'
@@ -84,6 +91,12 @@ type Upright =
   | { kind: 'blocks'; col: BlockColumn; x: number; z: number; p: ScreenPoint }
   | { kind: 'ghost'; target: BlockTarget; p: ScreenPoint }
   | { kind: 'boss'; boss: Boss; p: ScreenPoint }
+
+export interface Waypoint {
+  x: number
+  z: number
+  label: string
+}
 
 interface BlockTarget {
   gx: number
@@ -166,6 +179,40 @@ const SUIT_CLUES = [
   "A MAINTENANCE TICKET FOR AN ONBOARD A.I.: 'CONTAINMENT MODULE NOT RESPONDING. JAM ITS SIGNAL UNTIL RETRIEVAL.'",
 ]
 const MAX_STORED_SUPPLIES = 20
+const SAVE_KEY = 'cosmos-reborn-save-v1'
+const AUTOSAVE_INTERVAL = 20
+
+interface SaveData {
+  tracker?: Record<string, unknown>
+  hp?: number
+  slots?: (ItemId | null)[]
+  selected?: number
+  scene?: string
+  player?: { x?: number; z?: number; heading?: number }
+  flags?: { act2Played?: boolean; earthPlayed?: boolean; aftermathDone?: boolean; dropshipAdded?: boolean; dropshipSearched?: boolean; gameWon?: boolean }
+  pendingSupplies?: Partial<Record<ItemId, number>>
+  foodBin?: number
+  foodTimer?: number
+  raidTimer?: number
+  parts?: Record<string, Partial<Structure>>
+  surface?: { structures?: Structure[]; pickups?: Pickup[]; broken?: number[]; ice?: (number | null)[]; gardens?: Garden[]; blocks?: BlockColumn[] }
+  cave?: { pickups?: Pickup[]; broken?: number[]; blocks?: BlockColumn[] }
+  ship?: { pickups?: Pickup[] }
+  survivors?: Survivor[]
+  creatures?: Creature[]
+  wrecks?: Wreck[]
+  rigs?: [string, { ice: number; timer: number }][]
+  rocket?: { placed?: boolean; x?: number; z?: number; built?: Blueprint[]; damaged?: Blueprint[]; bay?: boolean; food?: number; fuel?: number }
+}
+
+function readSave(): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
 
 export class Game {
   private ctx: Ctx
@@ -179,8 +226,20 @@ export class Game {
   private anvilIndex = 0
   private shipWorld = createShipWorld()
   private earthPlayed = false
+  private act2Played = false
   private chatterTimer = 40
   private buildSpot: { x: number; z: number; radius: number; ok: boolean } | null = null
+  private waypoint: Waypoint | null = null
+  private spoken = new WeakSet<Message>()
+  private buffs = { quick: 0, steady: 0, glow: 0 }
+  private structureCooldowns = new Map<string, number>()
+  private groundRgb: number[][] = BIOMES['crash-site'].map(hexRgb)
+  private pebbleNear = '#6f78a8'
+  private pebbleFar = '#848dbb'
+  private baseSpeed = 1
+  private anomalyIntroduced = false
+  private announcedApps = new Set<App>()
+  private markerScreen: { x: number; y: number } | null = null
   private enemies: Enemy[] = []
   private projectiles: Projectile[] = []
   private wrecks: Wreck[] = []
@@ -205,6 +264,11 @@ export class Game {
   private rigs = new Map<string, { ice: number; timer: number }>()
   private lastStandTimer = 6
   private gameWon = false
+  private title = readSave() !== null
+  private saveTimer = AUTOSAVE_INTERVAL
+  private savedFlash = 0
+  private savedQuests = 0
+  private saveDisabled = false
   private finalRaid = false
   private iceCooldown = 0
   private fade = 0
@@ -230,6 +294,10 @@ export class Game {
   private creatures = createCreatures(createRng(5))
   private survivors: Survivor[] = createStrays()
   private productionTimer = 0
+  private foodBin = 0
+  /** The ice miner is too heavy to carry: it is dragged behind the player to the base. */
+  private dragging: Pickup | null = null
+  private foodTimer = FOOD_DAY
   private playStarted = false
   private pendingSupplies: Partial<Record<ItemId, number>> = {}
   private labels: { x: number; y: number; name: string; job: string }[] = []
@@ -251,6 +319,9 @@ export class Game {
 
     this.input.onAnyInput = () => this.audio.unlock()
     this.input.onKeyPress = (code) => this.handleMenuKey(code)
+    this.tablet.isUnlocked = (app) => this.appUnlocked(app)
+    this.tablet.lockHint = (app) =>
+      app === 'quests' ? 'BRING THE ROCKET PARTS TO THE KESTREL' : app === 'map' ? 'SALVAGE THE NAV CHART INSIDE THE SHIP' : app === 'scan' ? 'CALIBRATES IN ACT II' : ''
     this.input.onTablet = () => {
       if (!this.playing || this.inventory.open) return
       this.tablet.toggle()
@@ -275,15 +346,21 @@ export class Game {
       this.hotbar.select(this.hotbar.selected + d, this.time)
       this.sound('select')
     }
-    this.input.onMute = () => this.audio.toggleMute()
+    this.input.onMute = () => {
+      this.audio.toggleMute()
+      setVoiceMuted(this.audio.muted)
+      setTypingMuted(this.audio.muted)
+    }
     window.addEventListener('keydown', this.skipCutscene)
+    document.addEventListener('visibilitychange', this.persist)
+    window.addEventListener('pagehide', this.saveOnExit)
     canvas.addEventListener('pointermove', this.handlePointerMove)
     canvas.addEventListener('pointerdown', this.handlePointerDown)
     canvas.addEventListener('pointerup', this.handlePointerUp)
     canvas.addEventListener('contextmenu', this.preventMenu)
 
     this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
-    if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI() } })
+    if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI(), game: this } })
     setAssistantContext(() => this.assistantContext())
   }
 
@@ -299,6 +376,8 @@ export class Game {
     this.audio.close()
     setAssistantContext(null)
     window.removeEventListener('keydown', this.skipCutscene)
+    document.removeEventListener('visibilitychange', this.persist)
+    window.removeEventListener('pagehide', this.saveOnExit)
     this.canvas.removeEventListener('pointermove', this.handlePointerMove)
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
     this.canvas.removeEventListener('pointerup', this.handlePointerUp)
@@ -581,17 +660,120 @@ export class Game {
     return ANVIL_RECIPES.filter((r) => (r.item === 'survivor-gear' ? gear : unlocked || r.item === 'metal-rod'))
   }
 
-  private anvilInteraction(): Interaction {
-    const list = this.anvilRecipes()
-    const recipe = list[this.anvilIndex % list.length]
+  private appUnlocked(app: App): boolean {
+    const done = this.tracker.completed
+    if (app === 'ai') return true
+    if (app === 'quests') return done.includes('act1.pieces')
+    if (app === 'map') return done.includes('act1.inside-the-ship')
+    return this.tracker.act >= 2
+  }
+
+  private structureUse(s: Structure): Interaction {
+    const tracker = this.tracker
+    const cd = this.structureCooldowns.get(s.name) ?? 0
+    switch (s.kind) {
+      case 'dome':
+        return { title: '[E] REST IN THE HABITAT', detail: 'HEAL FULLY AND FEEL STEADY', ok: true, run: () => {
+          this.hp = PLAYER_MAX_HP
+          this.buffs.steady = 60
+          this.fade = 0.8
+          tracker.toastMessage('YOU SLEEP FOR AN HOUR IN A REAL BUNK. NOBODY KNOCKS.', '#9fe1cb')
+        } }
+      case 'dish':
+        if (tracker.dishTuned) return { title: 'RADIO DISH', detail: 'TUNED. ANOMALIES SHOW ON YOUR MAP', ok: false }
+        return { title: '[E] TUNE THE DISH', detail: 'LISTEN FOR THE ANOMALIES', ok: true, run: () => {
+          tracker.dishTuned = true
+          this.sound('clue')
+          tracker.toastMessage('THE DISH LOCKS ON TO EVERY ANOMALY ON THE MOON. THEY ARE ALL POINTING AT YOU. (CHECK YOUR MAP)', '#c9a6ff')
+        } }
+      case 'solar':
+        if (cd > this.time) return { title: 'SOLAR FARM', detail: `RECHARGING... ${Math.ceil(cd - this.time)}s`, ok: false }
+        return { title: '[E] CHARGE A POWER CELL', detail: 'THE PANELS STILL WORK', ok: true, run: () => {
+          this.structureCooldowns.set(s.name, this.time + 150)
+          tracker.collect('power-cell', 1)
+        } }
+      case 'rover': {
+        if (!tracker.roverFixed) {
+          const ok = tracker.count('metal-scrap') >= 4 && tracker.count('power-cell') >= 1
+          return { title: ok ? '[E] REPAIR THE ROVER' : 'REPAIR THE ROVER', detail: ok ? 'SCRAP 4 · POWER CELL 1 · UNLOCKS FAST TRAVEL' : `NEED SCRAP ${tracker.count('metal-scrap')}/4 · CELL ${tracker.count('power-cell')}/1`, ok, run: ok ? () => {
+            for (let i = 0; i < 4; i++) tracker.consume('metal-scrap')
+            tracker.consume('power-cell')
+            tracker.roverFixed = true
+            this.sound('build')
+            tracker.toastMessage('THE ROVER COUGHS AWAKE. PRESS E TO DRIVE, R TO PICK WHERE.', '#fac775')
+          } : undefined }
+        }
+        const dests = this.travelDestinations()
+        const dest = dests[this.anvilIndex % dests.length]
+        return { title: `[E] DRIVE TO ${dest.label}`, detail: `${Math.round(this.distanceTo(dest.x, dest.z))}m · [R] ${(this.anvilIndex % dests.length) + 1}/${dests.length}`, ok: true, run: () => {
+          this.placePlayer(dest.x, dest.z, 0)
+          this.fade = 1
+          this.sound('rumble')
+          tracker.toastMessage(`YOU DRIVE TO ${dest.label}`, '#fac775')
+        } }
+      }
+      case 'satellite': {
+        if (tracker.satelliteOnline) return { title: 'CRASHED SAT', detail: 'ONLINE. FOOD AND SURVIVORS SHOW ON YOUR MAP', ok: false }
+        const ok = tracker.count('anomaly-shard') >= 1 && tracker.count('metal-scrap') >= 2
+        return { title: ok ? '[E] REALIGN THE SATELLITE' : 'REALIGN THE SATELLITE', detail: ok ? 'SHARD 1 · SCRAP 2 · BOOSTS SCAN AND MAP' : `NEED SHARD ${tracker.count('anomaly-shard')}/1 · SCRAP ${tracker.count('metal-scrap')}/2`, ok, run: ok ? () => {
+          tracker.consume('anomaly-shard')
+          tracker.consume('metal-scrap')
+          tracker.consume('metal-scrap')
+          tracker.satelliteOnline = true
+          this.sound('discover')
+          tracker.toastMessage('SATELLITE ONLINE. YOUR MAP NOW SHOWS FOOD AND SURVIVORS, AND SCAN REACHES TWICE AS FAR.', '#9fe1ff')
+        } : undefined }
+      }
+      default:
+        return { title: s.name, detail: '', ok: false }
+    }
+  }
+
+  private biomePalette(): { rim: string; rim2: string; band: string; base: string } {
+    const target = (BIOMES[regionAt(this.player.x, this.player.z).id] ?? BIOMES['crash-site']).map(hexRgb)
+    const k = Math.min(1, 1.5 / 60)
+    this.groundRgb = this.groundRgb.map((c, i) => c.map((v, j) => v + (target[i][j] - v) * k))
+    const [rim, rim2, band, base] = this.groundRgb.map(rgbHex)
+    const b = this.groundRgb[2]
+    this.pebbleNear = rgbHex(b.map((v) => v * 0.85))
+    this.pebbleFar = rgbHex(b.map((v) => v * 1.05))
+    return { rim, rim2, band, base }
+  }
+
+  private travelDestinations(): { x: number; z: number; label: string }[] {
+    const list = [{ x: BASE_CENTER.x - 6, z: BASE_CENTER.z - 14, label: 'BASE' }]
+    if (rocket.placed) list.push({ x: rocket.x, z: rocket.z - 11, label: 'THE ROCKET' })
+    for (const st of this.surface.structures) {
+      if (st.discoverable && this.tracker.explored.includes(st.name) && st.kind !== 'rover') list.push({ x: st.x, z: st.z - st.radius - 7, label: st.name })
+    }
+    return list
+  }
+
+  private workbenchInteraction(): Interaction {
+    const tracker = this.tracker
+    const options: Interaction[] = []
+    const part = tracker.nextPart() ?? tracker.nextUpgrade()
+    if (part && PART_ITEMS[part]) {
+      const name = RECIPES[part].name
+      if (part !== 'rods' && part !== 'slab' && !tracker.baseParts.has('anvilset')) options.push({ title: `CRAFT ${name}`, detail: 'NEEDS THE ANVIL SET UP AT BASE', ok: false })
+      else if (part === 'slab' && !tracker.baseParts.has('minerset')) options.push({ title: `CRAFT ${name}`, detail: 'NEEDS THE ICE MINER SET UP AT BASE', ok: false })
+      else options.push(this.craftInteraction(part))
+    }
+    for (const r of this.anvilRecipes()) options.push(this.recipeInteraction(r))
+    if (options.length === 0) return { title: 'WORKBENCH', detail: 'NOTHING TO CRAFT RIGHT NOW', ok: false }
+    const i = this.anvilIndex % options.length
+    const pick = options[i]
+    return options.length > 1 ? { ...pick, detail: `${pick.detail} · [R] ${i + 1}/${options.length}` } : pick
+  }
+
+  private recipeInteraction(recipe: (typeof ANVIL_RECIPES)[number]): Interaction {
     const tracker = this.tracker
     const entries = Object.entries(recipe.cost) as [ItemId, number][]
     const ok = entries.every(([item, n]) => tracker.count(item) >= n)
     const cost = entries.map(([item, n]) => `${ITEMS[item].short} ${Math.min(tracker.count(item), n)}/${n}`).join('  ')
-    const more = list.length > 1 ? ' · [R] NEXT' : ''
     return {
       title: ok ? `[E] CRAFT ${ITEMS[recipe.item].name}` : `CRAFT ${ITEMS[recipe.item].name}`,
-      detail: (ok ? cost : `NEED ${cost}`) + more,
+      detail: ok ? cost : `NEED ${cost}`,
       ok,
       run: ok
         ? () => {
@@ -795,13 +977,22 @@ export class Game {
   }
 
   private handleMenuKey(code: string): boolean {
+    if (this.title) {
+      if (code === 'Enter' || code === 'Space' || code === 'KeyE' || code === 'KeyC') this.continueGame()
+      else if (code === 'KeyN') this.newGame()
+      return true
+    }
     if (!this.playing) return false
     if (code === 'KeyR' && !this.tablet.open && !this.inventory.open) {
-      const list = this.anvilRecipes()
-      if (list.length > 1) this.anvilIndex = (this.anvilIndex + 1) % list.length
+      this.anvilIndex++
       this.choiceIndex = (this.choiceIndex + 1) % 2
       this.rocketIndex++
       this.sound('select')
+      return true
+    }
+    if (code === 'KeyV' && !this.tablet.open) {
+      const on = toggleVoices()
+      this.tracker.toastMessage(on ? 'VOICES ON (V)' : 'VOICES OFF (V)', '#9aa2cf')
       return true
     }
     if (code === 'KeyX' && !this.tablet.open && !this.inventory.open) {
@@ -827,10 +1018,12 @@ export class Game {
 
   private tabletView(): TabletView {
     const lifeSigns = [
-      ...this.creatures.filter((c) => !c.scanned).map((c) => ({ x: c.x, z: c.z, label: 'DRIFTER', color: '#9fe1cb' })),
+      ...this.creatures.filter((c) => !c.scanned).map((c) => ({ x: c.x, z: c.z, label: SPECIES[speciesOf(c)].name, color: SPECIES[speciesOf(c)].color })),
       ...this.survivors.filter((s) => s.stray && !s.recruited).map((s) => ({ x: s.x, z: s.z, label: 'SURVIVOR', color: '#fac775' })),
+      ...ANOMALIES.filter((a) => !this.tracker.anomalies.includes(a.id)).map((a) => ({ x: a.x, z: a.z, label: 'ANOMALY', color: '#c9a6ff' })),
+      ...this.surface.gardens.filter((g) => !g.farm && this.cropsIn(g) > 0).map((g) => ({ x: g.x, z: g.z, label: 'FOOD', color: '#7fcf6a' })),
     ]
-    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface, lifeSigns }
+    return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface, lifeSigns, waypoint: this.onSurface ? this.waypoint : null }
   }
 
   devLocations(): DevLocation[] {
@@ -888,9 +1081,15 @@ export class Game {
     return done
   }
 
+  devPlayCutscene(kind: 'intro' | 'earth' | 'act2'): void {
+    this.cutscene = new Cutscene(kind)
+    this.input.clear()
+  }
+
   devJumpToAct(act: number): void {
     this.cutscene.skip()
     this.earthPlayed = true
+    this.act2Played = act > 2
     this.tracker.devJumpToAct(act, (part) => this.devAddPart(part))
     this.devEnsureRocket()
   }
@@ -1018,7 +1217,7 @@ export class Game {
   }
 
   devSetSpeed(mult: number): void {
-    this.player.speedMult = mult
+    this.baseSpeed = mult
   }
 
   devToggleMinimap(): boolean {
@@ -1192,8 +1391,197 @@ export class Game {
   private skipCutscene = (e: KeyboardEvent) => {
     const el = e.target as HTMLElement | null
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+    if (this.title) return
     if (!this.cutscene.done && !e.repeat) this.cutscene.skip()
   }
+
+  private persist = () => {
+    if (document.visibilityState === 'hidden') this.saveGame()
+  }
+
+  private saveOnExit = () => {
+    this.saveGame()
+  }
+
+  hasSave(): boolean {
+    return readSave() !== null
+  }
+
+  devDeleteSave(): void {
+    this.saveDisabled = true
+    try {
+      localStorage.removeItem(SAVE_KEY)
+    } catch {
+      return
+    }
+    location.reload()
+  }
+
+  devSaveNow(): string {
+    return this.saveGame() ? 'Saved' : 'Could not save (start playing first)'
+  }
+
+  private newGame(): void {
+    try {
+      localStorage.removeItem(SAVE_KEY)
+    } catch {
+      /* storage unavailable */
+    }
+    this.title = false
+  }
+
+  private continueGame(): void {
+    const data = readSave()
+    this.title = false
+    if (!data) return
+    try {
+      this.loadGame(data)
+    } catch (err) {
+      console.error('Save could not be loaded', err)
+      this.tracker.toastMessage('YOUR SAVE COULD NOT BE LOADED. STARTING FRESH.', '#ff8a7a')
+    }
+  }
+
+  private drawTitle(): void {
+    const { ctx, text } = this
+    rect(ctx, '#05040f', 0, 0, SCREEN_W, SCREEN_H)
+    for (let i = 0; i < 120; i++) {
+      const x = (i * 97 + this.time * (2 + (i % 5))) % SCREEN_W
+      const y = (i * 53) % SCREEN_H
+      rect(ctx, i % 4 ? '#6b66a8' : '#d9d6ff', x, y, 1, 1)
+    }
+    ctx.fillStyle = '#9aa2c8'
+    ctx.beginPath()
+    ctx.arc(SCREEN_W / 2, SCREEN_H + 190, 220, 0, Math.PI * 2)
+    ctx.fill()
+    text.text('COSMOS REBORN', SCREEN_W / 2, 50, '#fac775', { size: 14, align: 'center' })
+    const save = readSave()
+    const done = ((save?.tracker as Record<string, unknown> | undefined)?.completed as string[] | undefined)?.length ?? 0
+    const when = typeof save?.savedAt === 'number' ? new Date(save.savedAt).toLocaleString() : ''
+    const blink = Math.floor(this.time * 2) % 2 === 0
+    text.text(`${blink ? '▶ ' : '  '}[ENTER] CONTINUE`, SCREEN_W / 2, 92, '#d9dcef', { size: 7, align: 'center' })
+    text.text(`${done} QUESTS DONE · SAVED ${when}`, SCREEN_W / 2, 103, '#5b6496', { size: 5, align: 'center' })
+    text.text('[N] NEW GAME (ERASES YOUR SAVE)', SCREEN_W / 2, 120, '#ff8a7a', { size: 6, align: 'center' })
+  }
+
+  private saveGame(): boolean {
+    if (this.saveDisabled || this.title || !this.playStarted || this.finale) return false
+    const P = this.player
+    const inArena = this.scene === 'arena'
+    const parts: Record<string, { x: number; z: number; yaw?: number; damaged?: boolean }> = {}
+    for (const [key, st] of Object.entries(PART_STRUCTURES)) if (st) parts[key] = { x: st.x, z: st.z, yaw: st.yaw, damaged: st.damaged }
+    const data = {
+      v: 1,
+      savedAt: Date.now(),
+      tracker: this.tracker.toSave(),
+      scene: inArena ? 'surface' : this.scene,
+      player: inArena ? { x: BASE_CENTER.x - 6, z: BASE_CENTER.z - 10, heading: 0 } : { x: P.x, z: P.z, heading: P.heading },
+      hp: Math.max(1, Math.round(this.hp)),
+      slots: this.slots,
+      selected: this.hotbar.selected,
+      flags: {
+        earthPlayed: this.earthPlayed,
+        act2Played: this.act2Played,
+        aftermathDone: this.aftermathDone,
+        dropshipAdded: this.dropshipAdded,
+        dropshipSearched: this.dropshipSearched,
+        gameWon: this.gameWon,
+      },
+      pendingSupplies: this.pendingSupplies,
+      foodBin: this.foodBin,
+      foodTimer: this.foodTimer,
+      raidTimer: this.raidTimer,
+      parts,
+      surface: {
+        structures: this.surface.structures,
+        pickups: this.surface.pickups,
+        broken: this.surface.boulders.flatMap((b, i) => (b.broken ? [i] : [])),
+        ice: this.surface.craters.map((c) => c.iceLeft ?? null),
+        gardens: this.surface.gardens,
+        blocks: this.surface.blocks.toSave(),
+      },
+      cave: { pickups: this.caveWorld.pickups, broken: this.caveWorld.boulders.flatMap((b, i) => (b.broken ? [i] : [])), blocks: this.caveWorld.blocks.toSave() },
+      ship: { pickups: this.shipWorld.pickups },
+      survivors: this.survivors,
+      creatures: this.creatures,
+      wrecks: this.wrecks,
+      rigs: [...this.rigs.entries()],
+      rocket: { placed: rocket.placed, x: rocket.x, z: rocket.z, built: [...rocket.built], damaged: [...rocket.damaged], bay: rocket.bay, food: rocket.food, fuel: rocket.fuel },
+    }
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(data))
+      this.savedFlash = 1.6
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private loadGame(raw: Record<string, unknown>): void {
+    const d = raw as SaveData
+    this.cutscene.skip()
+    this.playStarted = true
+    this.tracker.loadSave(d.tracker ?? {})
+    this.hp = d.hp ?? PLAYER_MAX_HP
+    if (Array.isArray(d.slots)) this.slots = d.slots
+    this.earthPlayed = d.flags?.earthPlayed ?? true
+    this.act2Played = d.flags?.act2Played ?? this.tracker.completed.includes('act2.new-community')
+    this.aftermathDone = d.flags?.aftermathDone ?? false
+    this.dropshipAdded = d.flags?.dropshipAdded ?? false
+    this.dropshipSearched = d.flags?.dropshipSearched ?? false
+    this.gameWon = d.flags?.gameWon ?? false
+    this.pendingSupplies = d.pendingSupplies ?? {}
+    this.foodBin = d.foodBin ?? 0
+    this.foodTimer = d.foodTimer ?? FOOD_DAY
+    this.raidTimer = d.raidTimer ?? RAID_INTERVAL
+    for (const [key, saved] of Object.entries(d.parts ?? {})) {
+      const st = PART_STRUCTURES[key as BasePart]
+      if (st) Object.assign(st, saved)
+    }
+    const s = d.surface ?? {}
+    if (Array.isArray(s.structures)) {
+      const partByName = new Map(Object.values(PART_STRUCTURES).filter((p): p is Structure => !!p).map((p) => [p.name, p]))
+      this.surface.structures = s.structures.map((st) => {
+        const part = partByName.get(st.name)
+        return part && part.kind === st.kind ? part : st
+      })
+    }
+    if (Array.isArray(s.pickups)) this.surface.pickups = s.pickups
+    for (const i of s.broken ?? []) if (this.surface.boulders[i]) this.surface.boulders[i].broken = true
+    ;(s.ice ?? []).forEach((left, i) => {
+      const c = this.surface.craters[i]
+      if (c && c.ice && left !== null) c.iceLeft = left
+    })
+    if (Array.isArray(s.gardens)) this.surface.gardens = s.gardens
+    if (Array.isArray(s.blocks)) this.surface.blocks.loadSave(s.blocks)
+    if (Array.isArray(d.cave?.pickups)) this.caveWorld.pickups = d.cave.pickups
+    for (const i of d.cave?.broken ?? []) if (this.caveWorld.boulders[i]) this.caveWorld.boulders[i].broken = true
+    if (Array.isArray(d.cave?.blocks)) this.caveWorld.blocks.loadSave(d.cave.blocks)
+    if (Array.isArray(d.ship?.pickups)) this.shipWorld.pickups = d.ship.pickups
+    if (Array.isArray(d.survivors)) this.survivors = d.survivors
+    if (Array.isArray(d.creatures)) this.creatures = mergeCreatures(d.creatures, createCreatures(createRng(5)))
+    if (Array.isArray(d.wrecks)) this.wrecks = d.wrecks
+    if (Array.isArray(d.rigs)) this.rigs = new Map(d.rigs)
+    const r = d.rocket
+    if (r) {
+      rocket.placed = !!r.placed
+      rocket.x = r.x ?? 0
+      rocket.z = r.z ?? 0
+      rocket.built = new Set(r.built ?? [])
+      rocket.damaged = new Set(r.damaged ?? [])
+      rocket.bay = !!r.bay
+      rocket.food = r.food ?? 0
+      rocket.fuel = r.fuel ?? 0
+    }
+    this.scene = d.scene === 'cave' || d.scene === 'ship' ? d.scene : 'surface'
+    const p = d.player ?? {}
+    this.placePlayer(p.x ?? 0, p.z ?? 0, p.heading ?? 0)
+    this.hotbar.select(d.selected ?? 0, this.time)
+    this.savedQuests = this.tracker.completed.length
+    this.input.clear()
+    this.fade = 1
+  }
+
 
   private frame = (now: number) => {
     const raw = (now - this.last) / 1000
@@ -1212,10 +1600,21 @@ export class Game {
 
   private update(dt: number): void {
     this.audio.update(dt)
+    if (this.title) return
     if (!this.cutscene.done) {
       this.cutscene.update(dt, this.audio)
       if (this.cutscene.done) this.input.clear()
       return
+    }
+    this.savedFlash = Math.max(0, this.savedFlash - dt)
+    if (this.playStarted && !this.finale) {
+      this.saveTimer -= dt
+      const questsDone = this.tracker.completed.length
+      if (this.saveTimer <= 0 || questsDone !== this.savedQuests) {
+        this.saveTimer = AUTOSAVE_INTERVAL
+        this.savedQuests = questsDone
+        this.saveGame()
+      }
     }
     if (this.finale) {
       const c = this.input.controls()
@@ -1224,6 +1623,12 @@ export class Game {
       this.finale.update(dt, { up: c.forward > 0, down: c.forward < 0, fire: c.fire || c.jump || this.mouseFire, jump: c.jump, act }, this.audio)
       this.mouseFire = false
       if (this.finale.done) this.endFinale()
+      return
+    }
+    if (!this.act2Played && this.tracker.completed.includes('act2.new-community')) {
+      this.act2Played = true
+      this.cutscene = new Cutscene('act2')
+      this.input.clear()
       return
     }
     if (!this.earthPlayed && this.tracker.completed.includes('act1.strange-survival')) {
@@ -1248,7 +1653,10 @@ export class Game {
     const controls = menu || dead ? NO_CONTROLS : this.input.controls()
     if (this.mouseFire && !menu && !dead) controls.fire = true
     this.mouseFire = false
+    for (const k of ['quick', 'steady', 'glow'] as const) this.buffs[k] = Math.max(0, this.buffs[k] - dt)
+    this.player.speedMult = this.baseSpeed * (this.buffs.quick > 0 ? 1.35 : 1) * (this.dragging ? 0.5 : 1)
     this.player.update(dt, controls, this.world)
+    this.updateDrag(dt)
     if (this.scene === 'ship') [this.player.x, this.player.z] = clampToShip(this.player.x, this.player.z)
     if (this.scene === 'arena') this.updateArena(dt)
     this.camera.follow(this.player.x, this.player.z, this.player.heading, dt)
@@ -1278,6 +1686,12 @@ export class Game {
     this.updateParticles(dt)
     this.updateGardens(dt)
     this.updateChatter(dt)
+    for (const m of this.tracker.messages) {
+      if (m.kind !== 'transmission' || this.spoken.has(m) || this.tracker.time < m.born) continue
+      this.spoken.add(m)
+      if (m.glitch && /\d/.test(m.detail)) continue
+      speak(m.detail, voiceForSpeaker(m.text === 'MOONLINK' || m.text === 'MAYA' ? m.text : m.detail))
+    }
     this.iceCooldown = Math.max(0, this.iceCooldown - dt)
     for (const rig of this.rigs.values()) {
       if (rig.ice >= RIG_CAPACITY) continue
@@ -1297,6 +1711,7 @@ export class Game {
       for (const s of smoking) this.spawnBurst(s.x + (Math.random() - 0.5) * s.radius, s.z + (Math.random() - 0.5) * s.radius, s.kind === 'rocket' ? 8 : 3, 2, '#4b5276', 1.5)
     }
 
+    this.waypoint = this.questTarget()
     this.buildSpot = null
     this.interaction = menu ? null : this.findInteraction()
     if (this.interactQueued) {
@@ -1398,16 +1813,18 @@ export class Game {
     const heal = held ? FOOD[held.item] : undefined
     if (!held || !heal) return null
     const name = ITEMS[held.item].name
-    if (this.hp >= PLAYER_MAX_HP) return { title: name, detail: 'HEALTH IS ALREADY FULL', ok: false }
     return {
       title: `[E] EAT ${name}`,
-      detail: `+${heal} HEALTH`,
+      detail: `+${heal} HEALTH · ${held.item === 'moon-berry' ? 'QUICK: +35% SPEED' : held.item === 'star-melon' ? 'STEADY: FAST HEALING' : 'GLOWING: LIGHT IN CAVES'}`,
       ok: true,
       run: () => {
         if (!this.tracker.consume(held.item)) return
         this.hp = Math.min(PLAYER_MAX_HP, this.hp + heal)
+        if (held.item === 'moon-berry') this.buffs.quick = 60
+        if (held.item === 'star-melon') this.buffs.steady = 60
+        if (held.item === 'glow-cap') this.buffs.glow = 90
         this.sound('pickup')
-        this.tracker.toastMessage(`ATE ${name}  +${heal} HEALTH`, ITEMS[held.item].color)
+        this.tracker.toastMessage(`ATE ${name}  +${heal} HEALTH · ${held.item === 'moon-berry' ? 'QUICK' : held.item === 'star-melon' ? 'STEADY' : 'GLOWING'}`, ITEMS[held.item].color)
       },
     }
   }
@@ -1415,9 +1832,13 @@ export class Game {
   private updateActTwo(dt: number): void {
     const { player, tracker } = this
     updateCreatures(this.creatures, dt, player.x, player.z, this.world)
+    if (!this.anomalyIntroduced && ANOMALIES.some((a) => this.distanceTo(a.x, a.z) < 45)) {
+      this.anomalyIntroduced = true
+      tracker.aiChatter(ANOMALY_INTRO)
+    }
     tracker.enterRegion(regionAt(player.x, player.z))
     if (tracker.signalRevealed && !tracker.signalFound && this.distanceTo(HATCH.x, HATCH.z) < HATCH_RANGE) tracker.findSignal()
-    if (tracker.baseParts.has('housing') && !this.survivors.some((s) => !s.stray)) {
+    if (tracker.act >= 3 && !this.survivors.some((s) => !s.stray)) {
       const named = createSurvivors()
       for (const s of named) s.job = tracker.jobs[s.name] ?? null
       this.survivors.push(...named)
@@ -1426,16 +1847,113 @@ export class Game {
   }
 
   private updateProduction(dt: number): void {
-    const working = this.survivors.filter((s) => s.job)
+    this.updateHunger(dt)
+    const working = this.survivors.filter((s) => s.job && !(s.hunger ?? 0))
     if (working.length > 0) {
       this.productionTimer += dt
       if (this.productionTimer >= PRODUCTION_INTERVAL) {
         this.productionTimer = 0
         for (const s of working) {
+          if (s.job === 'FARMER') {
+            this.foodBin += 1
+            continue
+          }
           const item = JOB_OUTPUT[s.job!]
           this.pendingSupplies[item] = Math.min(MAX_STORED_SUPPLIES, (this.pendingSupplies[item] ?? 0) + 1)
         }
       }
+    }
+  }
+
+  private updateDrag(dt: number): void {
+    const load = this.dragging
+    if (!load) return
+    if (!this.onSurface || load.collected) {
+      this.dragging = null
+      return
+    }
+    const dx = wrap(this.player.x - load.x)
+    const dz = wrap(this.player.z - load.z)
+    const d = Math.hypot(dx, dz)
+    const rope = 2.6
+    if (d > rope) {
+      const pull = d - rope
+      load.x += (dx / d) * pull
+      load.z += (dz / d) * pull
+      if (Math.random() < dt * 14) this.spawnBurst(load.x, load.z, 0, 1, '#9aa2c8', 1)
+    }
+    if (Math.hypot(wrap(load.x - BASE_CENTER.x), wrap(load.z - BASE_CENTER.z)) < BASE_RADIUS) {
+      this.dragging = null
+      load.collected = true
+      this.spawnBurst(load.x, load.z, 0, 8, ITEMS[load.item].color, 2)
+      this.tracker.collect(load.item)
+      this.tracker.toastMessage('YOU HAUL THE ICE MINER INTO THE BASE. PRESS E AT THE BASE TO SET IT UP.', '#5dcaa5')
+      this.sound('land')
+    }
+  }
+
+  private eaters(): Survivor[] {
+    return this.survivors.filter((s) => s.recruited || !s.stray)
+  }
+
+  private updateHunger(dt: number): void {
+    const tracker = this.tracker
+    const eaters = this.eaters()
+    if (tracker.act < 2 || eaters.length === 0 || !this.playing) return
+    const before = this.foodTimer
+    this.foodTimer -= dt
+    if (before > 20 && this.foodTimer <= 20 && this.foodBin < eaters.length) {
+      tracker.toastMessage(`FOOD BIN LOW: ${this.foodBin}/${eaters.length} MEALS. YOUR PEOPLE EAT SOON`, '#ff8a7a')
+    }
+    if (this.foodTimer > 0) return
+    this.foodTimer = FOOD_DAY
+    let hungry = 0
+    const starved: Survivor[] = []
+    for (const s of eaters) {
+      if (this.foodBin > 0) {
+        this.foodBin--
+        s.hunger = 0
+      } else {
+        s.hunger = (s.hunger ?? 0) + 1
+        hungry++
+        if (s.hunger >= STARVE_DAYS && s.stray) starved.push(s)
+      }
+    }
+    for (const v of starved) {
+      this.surface.structures.push({ kind: 'grave', name: `${v.name}'S MARKER`, x: v.homeX, z: v.homeZ, radius: 0.6, mapColor: '#5b6496', yaw: Math.random() })
+    }
+    if (starved.length) {
+      this.survivors = this.survivors.filter((s) => !starved.includes(s))
+      tracker.starveCivilians(starved.map((v) => v.name))
+    } else if (hungry > 0) {
+      tracker.toastMessage(`${hungry} ${hungry === 1 ? 'CIVILIAN WENT' : 'CIVILIANS WENT'} HUNGRY AND STOPPED WORKING. STOCK THE FOOD BIN!`, '#ff8a7a')
+      this.sound('warning')
+    } else {
+      tracker.toastMessage(`A NEW DAY. EVERYONE ATE. ${this.foodBin} ${this.foodBin === 1 ? 'MEAL' : 'MEALS'} LEFT IN THE BIN`, '#9fe1cb')
+    }
+  }
+
+  private foodBinInteraction(): Interaction {
+    const tracker = this.tracker
+    const eat = this.eaters().length
+    const foods = (Object.keys(FOOD) as ItemId[]).filter((item) => tracker.count(item) > 0)
+    const meals = foods.reduce((n, item) => n + tracker.count(item) * (item === 'star-melon' ? 2 : item === 'glow-cap' ? 3 : 1), 0)
+    const status = `${this.foodBin} MEALS · ${eat} EAT EVERY DAY`
+    if (!foods.length) return { title: 'FOOD BIN', detail: `${status} · BRING BERRIES, MELONS OR GLOW CAPS`, ok: false }
+    return {
+      title: `[E] STOCK THE FOOD BIN (+${meals} MEALS)`,
+      detail: status,
+      ok: true,
+      run: () => {
+        for (const item of foods) {
+          const n = tracker.count(item)
+          for (let i = 0; i < n; i++) tracker.consume(item)
+        }
+        this.foodBin += meals
+        for (const s of this.eaters()) if (s.hunger) s.hunger = 0
+        tracker.toastMessage(`FOOD BIN: ${this.foodBin} MEALS`, '#7fcf6a')
+        this.sound('select')
+      },
     }
   }
 
@@ -1445,7 +1963,7 @@ export class Game {
     this.turretCooldown = Math.max(0, this.turretCooldown - dt)
     this.hurtFlash = Math.max(0, this.hurtFlash - dt)
     this.sinceHurt += dt
-    if (this.sinceHurt > 5 && this.hp < PLAYER_MAX_HP && this.deadTimer <= 0) this.hp = Math.min(PLAYER_MAX_HP, this.hp + 6 * dt)
+    if ((this.sinceHurt > 5 || this.buffs.steady > 0) && this.hp < PLAYER_MAX_HP && this.deadTimer <= 0) this.hp = Math.min(PLAYER_MAX_HP, this.hp + (this.buffs.steady > 0 ? 14 : 6) * dt)
 
     if (this.deadTimer > 0) {
       this.deadTimer -= dt
@@ -1472,6 +1990,19 @@ export class Game {
       this.sound('warning')
     }
     if (quest === 'act3.defend-settlement' && tracker.baseParts.has('turret') && !this.wave.started) this.startWave()
+    for (const app of ['quests', 'map', 'scan'] as App[]) {
+      if (!this.announcedApps.has(app) && this.appUnlocked(app)) {
+        this.announcedApps.add(app)
+        if (this.playStarted && tracker.time > 2) tracker.toastMessage(`TABLET: ${app === 'quests' ? 'QUESTS' : app.toUpperCase()} APP UNLOCKED (TAB)`, '#5dcaa5')
+      }
+    }
+    if (tracker.completed.includes('act1.inside-the-ship') && !this.surface.structures.some((s) => s.kind === 'workbench')) {
+      this.surface.structures.push({ kind: 'workbench', name: 'WORKBENCH', x: 6, z: 46, radius: 2.2, mapColor: '#fac775', yaw: 0.3 })
+      tracker.toastMessage('YOU DRAG THE KESTREL\'S WORKBENCH OUT TO THE BASE SITE. ALL CRAFTING HAPPENS THERE NOW.', '#fac775')
+    }
+    if (tracker.act >= 2 && !this.surface.structures.some((s) => s.kind === 'foodbin')) {
+      this.surface.structures.push({ kind: 'foodbin', name: 'FOOD BIN', x: FOOD_BIN.x, z: FOOD_BIN.z, radius: 1.4, mapColor: '#7fcf6a', yaw: 0.2 })
+    }
     if (tracker.act >= 4 && !this.dropshipAdded) {
       this.dropshipAdded = true
       this.surface.structures.push({ kind: 'dropship', name: 'INVADER DROPSHIP', x: 560, z: 720, radius: 5, mapColor: '#ff5a5a', yaw: 0.8, discoverable: true })
@@ -1589,7 +2120,7 @@ export class Game {
 
   private damagePlayer(amount: number): void {
     if (this.devGod) return
-    const dmg = this.tracker.hasItem('armor-plating') ? amount * (1 - ARMOR_REDUCTION) : amount
+    const dmg = (this.tracker.hasItem('armor-plating') ? amount * (1 - ARMOR_REDUCTION) : amount) * (this.buffs.steady > 0 ? 0.75 : 1)
     this.hp -= dmg
     this.hurtFlash = 0.3
     this.sinceHurt = 0
@@ -1721,6 +2252,212 @@ export class Game {
     return Math.hypot(wrap(x - this.player.x), wrap(z - this.player.z))
   }
 
+  private questTarget(): Waypoint | null {
+    const tracker = this.tracker
+    const quest = tracker.activeQuest
+    if (!quest || this.scene === 'arena') return null
+    const progress = tracker.progress(quest)
+    const index = progress.findIndex((p) => !p.done)
+    if (index < 0) return null
+    const o = quest.objectives[index]
+    type Scene = 'surface' | 'cave' | 'ship'
+    const at = (scene: Scene, x: number, z: number, label: string): { scene: Scene; x: number; z: number; label: string } => ({ scene, x, z, label })
+    const nearest = <T extends { x: number; z: number }>(list: T[]): T | null => {
+      let best: T | null = null
+      let bestD = Infinity
+      for (const item of list) {
+        const d = Math.hypot(wrap(item.x - this.player.x), wrap(item.z - this.player.z))
+        if (d < bestD) {
+          bestD = d
+          best = item
+        }
+      }
+      return best
+    }
+    const surfacePickup = (items: ItemId[]) => nearest(this.surface.pickups.filter((p) => !p.collected && items.includes(p.item)))
+    const workbench = () => {
+      const bench = this.surface.structures.find((s) => s.kind === 'workbench')
+      return bench ? at('surface', bench.x, bench.z, 'WORKBENCH') : at('ship', SHIP_WORKBENCH.x, SHIP_WORKBENCH.z, 'WORKBENCH')
+    }
+    const rocketSpot = () => (rocket.placed ? at('surface', rocket.x, rocket.z, 'ROCKET') : null)
+    const survivor = (filter: (s: Survivor) => boolean, label: string) => {
+      const s = nearest(this.survivors.filter(filter))
+      return s ? at('surface', s.x, s.z, label || s.name) : null
+    }
+    let target: { scene: Scene; x: number; z: number; label: string } | null = null
+    switch (o.kind) {
+      case 'collect':
+      case 'collect-any': {
+        const items = o.kind === 'collect' ? [o.item] : [...o.items]
+        if (this.dragging && items.includes(this.dragging.item)) {
+          target = at('surface', BASE_CENTER.x, BASE_CENTER.z, 'BASE')
+          break
+        }
+        if (this.scene === 'cave' || items.includes('rare-ore')) {
+          const p = nearest(this.caveWorld.pickups.filter((pk) => !pk.collected && items.includes(pk.item)))
+          if (p) target = at('cave', p.x, p.z, ITEMS[p.item].name)
+        }
+        if (!target) {
+          const p = surfacePickup(items)
+          if (p) target = at('surface', p.x, p.z, ITEMS[p.item].name)
+        }
+        if (!target && this.scene === 'ship') {
+          const p = nearest(this.shipWorld.pickups.filter((pk) => !pk.collected && items.includes(pk.item)))
+          if (p) target = at('ship', p.x, p.z, ITEMS[p.item].name)
+        }
+        break
+      }
+      case 'return-to-base':
+      case 'wave':
+        target = at('surface', BASE_CENTER.x, BASE_CENTER.z, 'BASE')
+        break
+      case 'return-to-ship':
+      case 'ship':
+        target = at('surface', SHIP_SPOT.x, SHIP_SPOT.z, 'THE KESTREL')
+        break
+      case 'search': {
+        const s = nearest(this.shipWorld.structures.filter((st) => WRECKAGE[st.name] && !tracker.searched.includes(st.name)))
+        if (s) target = at('ship', s.x, s.z, s.name)
+        break
+      }
+      case 'build': {
+        if (PART_ITEMS[o.part]) target = workbench()
+        else if (!FREE_PARTS.includes(o.part)) target = at('surface', BASE_CENTER.x, BASE_CENTER.z, 'BASE SITE')
+        break
+      }
+      case 'discover':
+      case 'inspect': {
+        const s = nearest(this.surface.structures.filter((st) => st.discoverable && (o.kind === 'discover' ? !tracker.explored.includes(st.name) : !tracker.inspected.includes(st.name))))
+        if (s) target = at('surface', s.x, s.z, s.name)
+        break
+      }
+      case 'clue': {
+        const p = nearest(this.surface.pickups.filter((pk) => pk.clue && !pk.collected && !tracker.clues.includes(pk.clue.id)))
+        const shipLog = this.shipWorld.pickups.find((pk) => pk.clue && !pk.collected)
+        if (this.scene === 'ship' && shipLog) target = at('ship', shipLog.x, shipLog.z, 'DATA LOG')
+        else if (p) target = at('surface', p.x, p.z, 'DATA LOG')
+        else if (shipLog) target = at('ship', shipLog.x, shipLog.z, 'DATA LOG')
+        break
+      }
+      case 'region': {
+        const r = nearest(REGIONS.filter((rg) => !rg.home && !tracker.regions.includes(rg.id)).map((rg) => ({ ...rg })))
+        if (r) target = at('surface', r.x, r.z, r.name)
+        break
+      }
+      case 'scan': {
+        const c = nearest(this.creatures.filter((cr) => !cr.scanned))
+        if (c) target = at('surface', c.x, c.z, SPECIES[speciesOf(c)].name)
+        break
+      }
+      case 'place': {
+        if (o.item === 'rig-kit' && tracker.hasItem('rig-kit')) {
+          const c = nearest(this.surface.craters.filter((cr) => cr.ice))
+          if (c) target = at('surface', c.x, c.z, 'ICY CRATER')
+        } else if (!tracker.hasItem(o.item) && o.item !== 'launch-kit') target = workbench()
+        break
+      }
+      case 'civilians': {
+        const hasFood = (Object.keys(FOOD) as ItemId[]).some((item) => tracker.count(item) > 0)
+        if (!hasFood) {
+          const g = nearest(this.surface.gardens.filter((gd) => this.cropsIn(gd) > 0))
+          if (g) target = at('surface', g.x, g.z, g.farm ? 'FARM' : 'GARDEN')
+        }
+        target = target ?? survivor((s) => s.stray && !s.recruited, 'SURVIVOR')
+        break
+      }
+      case 'boss': {
+        const a = nearest(ANOMALIES.filter((an) => !tracker.bosses.includes(an.id)).map((an) => ({ ...an })))
+        if (a) target = at('surface', a.x, a.z, 'ANOMALY')
+        break
+      }
+      case 'signal':
+      case 'cave':
+        target = at('surface', HATCH.x, HATCH.z, 'SEALED HATCH')
+        break
+      case 'cavern':
+        target = at('cave', CAVERN.x, CAVERN.z, 'HIDDEN CAVERN')
+        break
+      case 'talk':
+        target = survivor((s) => !s.stray && !tracker.talked.includes(s.name), '')
+        break
+      case 'assign':
+        target = survivor((s) => s.recruited && !s.job, '')
+        break
+      case 'supplies': {
+        const st = PART_STRUCTURES.storage
+        if (st) target = at('surface', st.x, st.z, 'STORAGE')
+        break
+      }
+      case 'defeat': {
+        const e = nearest(this.enemies)
+        if (e) target = at('surface', e.x, e.z, 'SUIT')
+        break
+      }
+      case 'search-suit': {
+        const w = nearest(this.wrecks.filter((wr) => !wr.searched))
+        if (w) target = at('surface', w.x, w.z, 'FALLEN SUIT')
+        break
+      }
+      case 'equip':
+        target = tracker.hasItem('survivor-gear') ? survivor((s) => (s.recruited || !s.stray) && !s.armed, '') : workbench()
+        break
+      case 'promise':
+        target = survivor((s) => s.name === 'MAYA', 'MAYA')
+        break
+      case 'blueprints': {
+        const sources: { scene: Scene; x: number; z: number; label: string; id: Blueprint }[] = []
+        const okoro = this.survivors.find((s) => s.name === 'OKORO')
+        if (okoro) sources.push({ ...at('surface', okoro.x, okoro.z, 'OKORO'), id: 'frame' })
+        sources.push({ ...at('surface', 560, 720, 'DROPSHIP'), id: 'engine' })
+        sources.push({ ...at('cave', TERMINAL.x, TERMINAL.z, 'TERMINAL'), id: 'controls' })
+        const drill = STRUCTURES.find((s) => s.kind === 'drill')
+        if (drill) sources.push({ ...at('surface', drill.x, drill.z, 'ICE DRILL'), id: 'fuel' })
+        const dome = STRUCTURES.find((s) => s.kind === 'dome')
+        if (dome) sources.push({ ...at('surface', dome.x, dome.z, 'HABITAT'), id: 'cabin' })
+        const missing = sources.filter((s) => !tracker.blueprints.includes(s.id))
+        const sameScene = missing.filter((s) => s.scene === (this.scene === 'ship' ? 'surface' : this.scene))
+        target = nearest(sameScene.length ? sameScene : missing)
+        break
+      }
+      case 'repair': {
+        const broken = nearest(this.surface.structures.filter((s) => s.damaged))
+        target = broken ? at('surface', broken.x, broken.z, broken.name) : rocketSpot()
+        break
+      }
+      case 'fuel': {
+        if (tracker.hasItem('rocket-fuel')) target = rocketSpot()
+        else if (tracker.hasItem('lunar-ice')) {
+          const m = this.surface.structures.find((s) => s.kind === 'miner')
+          if (m) target = at('surface', m.x, m.z, 'ICE MINER')
+        } else {
+          const c = nearest(this.surface.craters.filter((cr) => cr.ice && (cr.iceLeft ?? 0) > 0))
+          if (c) target = at('surface', c.x, c.z, 'ICY CRATER')
+        }
+        break
+      }
+      case 'sections':
+      case 'raid':
+      case 'choice':
+      case 'preflight':
+      case 'laststand':
+      case 'intact':
+      case 'launch':
+      case 'bay':
+      case 'stock':
+        target = rocketSpot()
+        break
+      default:
+        target = null
+    }
+    if (!target) return null
+    const here = this.scene
+    if (target.scene === here) return { x: target.x, z: target.z, label: target.label }
+    if (here === 'ship') return { x: 0, z: -5.6, label: 'EXIT THE SHIP' }
+    if (here === 'cave') return { x: LADDER.x, z: LADDER.z, label: 'LADDER UP' }
+    if (target.scene === 'cave') return { x: HATCH.x, z: HATCH.z, label: 'HATCH (CAVES)' }
+    return { x: SHIP_SPOT.x, z: SHIP_SPOT.z, label: 'ENTER THE KESTREL' }
+  }
+
   private directionTo(x: number, z: number): NearbyResource['direction'] {
     const angle = Math.atan2(wrap(x - this.player.x), wrap(z - this.player.z)) - this.player.heading
     const a = Math.atan2(Math.sin(angle), Math.cos(angle))
@@ -1743,6 +2480,11 @@ export class Game {
     const { world, player, tracker } = this
     if (!player.grounded) return null
 
+    if (this.dragging) {
+      const load = this.dragging
+      const d = Math.round(Math.hypot(wrap(load.x - BASE_CENTER.x), wrap(load.z - BASE_CENTER.z)))
+      return { title: '[E] LET GO OF THE ICE MINER', detail: `DRAGGING IT TO BASE · ${d}m`, ok: true, run: () => (this.dragging = null) }
+    }
     const build = this.onSurface ? this.buildInteraction() : null
     if (build) return build
 
@@ -1754,6 +2496,18 @@ export class Game {
       if (d < pickupDist && Math.abs(groundHeightAt(world, p.x, p.z) - player.y) < 1.5) {
         pickupDist = d
         pickup = p
+      }
+    }
+    if (pickup && pickup.item === 'ice-miner' && this.onSurface) {
+      const target = pickup
+      return {
+        title: '[E] GRAB THE ICE MINER',
+        detail: 'TOO HEAVY TO CARRY. DRAG IT BACK TO BASE',
+        ok: true,
+        run: () => {
+          this.dragging = target
+          tracker.toastMessage('IT WEIGHS A TON. WALK BACK TO BASE AND IT DRAGS BEHIND YOU.', '#5dcaa5')
+        },
       }
     }
     if (pickup) {
@@ -1795,15 +2549,16 @@ export class Game {
       )
     }
     for (const creature of this.creatures) {
-      if (creature.scanned) continue
+      if (creature.scanned || !surfaced(creature, this.time)) continue
+      const info = SPECIES[speciesOf(creature)]
       consider(creature.x, creature.z, 0, SCAN_RANGE, () => ({
-        title: '[E] SCAN CREATURE',
-        detail: 'IT SEEMS TO BE WATCHING YOU',
+        title: `[E] SCAN ${info.name}`,
+        detail: info.detail,
         ok: true,
         run: () => {
           creature.scanned = true
           creature.fleeing = 3
-          this.spawnBurst(creature.x, creature.z, 2.4, 10, '#9fe1cb', 3)
+          this.spawnBurst(creature.x, creature.z, 2.4, 10, info.color, 3)
           tracker.scanCreature(String(creature.id), speciesNote(creature))
         },
       }))
@@ -1969,7 +2724,7 @@ export class Game {
         )
         continue
       }
-      if (s.kind === 'drill' && tracker.act >= 4) {
+      if (s.kind === 'drill' && tracker.hasItem('power-drill')) {
         consider(s.x, s.z, s.radius, INSPECT_RANGE, () => {
           const holding = this.heldItem() === 'power-drill'
           if (!holding) return { title: 'ICE DRILL', detail: 'HOLD THE POWER DRILL TO DRILL FOR FUEL', ok: false }
@@ -2030,7 +2785,7 @@ export class Game {
         )
         continue
       }
-      if (s.kind === 'miner' && tracker.act >= 4 && tracker.count('lunar-ice') > 0) {
+      if (s.kind === 'miner' && tracker.count('lunar-ice') > 0) {
         consider(s.x, s.z, s.radius, INSPECT_RANGE, () => {
           const power = this.surface.structures.find((p) => p.kind === 'power')
           if (!power || power.damaged) return { title: 'ICE MINER', detail: power ? 'THE POWER IS DAMAGED. ELECTROLYSIS NEEDS ELECTRICITY' : 'BUILD POWER FIRST. ELECTROLYSIS NEEDS ELECTRICITY', ok: false }
@@ -2057,16 +2812,15 @@ export class Game {
         continue
       }
       if (s.kind === 'anvil') {
-        consider(s.x, s.z, s.radius, 3.5, () => this.anvilInteraction())
+        consider(s.x, s.z, s.radius, 3.5, () => ({ title: 'ANVIL', detail: 'THE WORKBENCH USES IT TO FORGE TOOLS', ok: false }))
         continue
       }
       if (s.kind === 'workbench') {
-        const part = tracker.nextPart()
-        consider(s.x, s.z, s.radius, 3, () =>
-          part && RECIPES[part].station === 'workbench'
-            ? this.craftInteraction(part)
-            : { title: 'WORKBENCH', detail: 'NOTHING TO CRAFT HERE RIGHT NOW', ok: false },
-        )
+        consider(s.x, s.z, s.radius, 3, () => this.workbenchInteraction())
+        continue
+      }
+      if (s.kind === 'foodbin') {
+        consider(s.x, s.z, s.radius, 3, () => this.foodBinInteraction())
         continue
       }
       if (s.kind === 'lander' && (tracker.completed.includes('act1.pieces') || tracker.shipEntered)) {
@@ -2084,6 +2838,10 @@ export class Game {
             ? { title: tracker.caveReached ? '[E] CLIMB DOWN' : '[E] DRILL OPEN THE HATCH', detail: 'INTO THE CAVES', ok: true, run: () => this.enterCave() }
             : { title: 'SEALED HATCH', detail: 'HOLD THE POWER DRILL TO OPEN IT', ok: false },
         )
+        continue
+      }
+      if (tracker.inspected.includes(s.name) && ['dome', 'dish', 'solar', 'rover', 'satellite'].includes(s.kind)) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => this.structureUse(s))
         continue
       }
       const info = INSPECTIONS[s.kind]
@@ -2111,6 +2869,7 @@ export class Game {
     if (!this.atBase()) return null
     const part = this.tracker.nextPart() ?? this.tracker.nextUpgrade()
     if (!part || RECIPES[part].station || FREE_PARTS.includes(part)) return null
+    if (PART_ITEMS[part]) return { title: `CRAFT ${RECIPES[part].name}`, detail: 'USE THE WORKBENCH (FOLLOW THE MARKER)', ok: false }
     const spot = PART_STRUCTURES[part]
     if (spot && this.distanceTo(spot.x, spot.z) < spot.radius + 1.5) {
       return { title: `${RECIPES[part].verb ?? 'BUILD'} ${RECIPES[part].name}`, detail: 'STEP OFF THE BUILD SPOT', ok: false }
@@ -2236,6 +2995,11 @@ export class Game {
   }
 
   private render(): void {
+    if (this.title) {
+      this.text.begin()
+      this.drawTitle()
+      return
+    }
     if (this.finale) {
       this.text.begin()
       this.finale.draw(this.ctx, this.text)
@@ -2252,6 +3016,26 @@ export class Game {
 
     const inShip = this.scene === 'ship'
     if (surface) this.sky.draw(ctx, cam, player.x, player.z, this.time)
+    if (surface) {
+      for (const a of ANOMALIES) {
+        if (this.tracker.anomalies.includes(a.id)) continue
+        const d = this.distanceTo(a.x, a.z)
+        if (d > ANOMALY_BEAM_RANGE) continue
+        const rel = Math.atan2(Math.sin(Math.atan2(wrap(a.x - player.x), wrap(a.z - player.z)) - cam.heading), Math.cos(Math.atan2(wrap(a.x - player.x), wrap(a.z - player.z)) - cam.heading))
+        if (Math.abs(rel) > 1.2) continue
+        const bx = SCREEN_W / 2 + Math.tan(rel) * 160
+        if (bx < -4 || bx > SCREEN_W + 4) continue
+        const strength = 1 - d / ANOMALY_BEAM_RANGE
+        const w = Math.max(1, Math.round(3 * strength + 1))
+        const pulse = 0.5 + 0.5 * Math.sin(this.time * 2 + a.x)
+        const top = horizonY(bx)
+        const grad = ctx.createLinearGradient(0, 0, 0, top)
+        grad.addColorStop(0, 'rgba(201,166,255,0)')
+        grad.addColorStop(1, `rgba(201,166,255,${0.25 + 0.35 * strength * pulse})`)
+        ctx.fillStyle = grad
+        ctx.fillRect(Math.round(bx - w / 2), 0, w, top)
+      }
+    }
     else if (inShip) drawShipCeiling(ctx, cam, this.time)
     else drawCaveCeiling(ctx, cam, this.time)
     this.drawSurface()
@@ -2301,7 +3085,7 @@ export class Game {
     decals.sort((a, b) => b.depth - a.depth)
     for (const d of decals) {
       if (d.kind === 'crater') drawCrater(ctx, cam, d.crater, d.pos)
-      else if (d.kind === 'pebble') rect(ctx, d.p.scale > 4 ? '#6f78a8' : '#848dbb', d.p.sx, d.p.sy, d.p.scale > 5 ? 2 : 1, 1)
+      else if (d.kind === 'pebble') rect(ctx, this.onSurface ? (d.p.scale > 4 ? this.pebbleNear : this.pebbleFar) : d.p.scale > 4 ? '#6f78a8' : '#848dbb', d.p.sx, d.p.sy, d.p.scale > 5 ? 2 : 1, 1)
       else if (d.kind === 'pad') this.drawBasePad()
       else if (d.kind === 'plot') {
         const ok = this.buildSpot?.ok ?? true
@@ -2334,7 +3118,7 @@ export class Game {
       const pos = cam.toCamera(structure.x, structure.z)
       if (structure.kind === 'bulkhead' && pos.rz < playerRz + 1) continue
       const p = cam.projectPoint(pos.rx, pos.rz)
-      if (p && p.sx > -80 && p.sx < SCREEN_W + 80) uprights.push({ kind: 'structure', structure, p })
+      if (p && p.sx > -80 && p.sx < SCREEN_W + 80) uprights.push({ kind: 'structure', structure, p: structure.kind === 'bulkhead' ? { ...p, depth: p.depth + 10000 } : p })
     }
     for (const pickup of world.pickups) {
       if (pickup.collected) continue
@@ -2445,6 +3229,61 @@ export class Game {
     }
     this.drawParticles()
     this.drawProjectiles()
+    if (this.waypoint && !this.finale) {
+      const wp = this.waypoint
+      const c = cam.toCamera(wp.x, wp.z)
+      let sp = cam.projectPoint(c.rx, c.rz)
+      const dist = Math.hypot(c.rx, c.rz)
+      // Past the horizon: pin the marker on the horizon in the target's direction so it stays visible.
+      if (!sp && c.rz >= 2 && dist > 0) {
+        const k = (HORIZON_D * 0.97) / dist
+        sp = cam.projectPoint(c.rx * k, c.rz * k)
+      }
+      const onScreen = sp && sp.sx > 6 && sp.sx < SCREEN_W - 6
+      if (!onScreen) {
+        // Behind you or off to the side: an arrow on the screen edge.
+        const right = c.rx > 0 || (c.rz < 0 && c.rx === 0)
+        const x = right ? SCREEN_W - 8 : 8
+        const y = 72 + Math.sin(this.time * 4) * 2
+        ctx.fillStyle = '#16182c'
+        ctx.beginPath()
+        ctx.moveTo(right ? x + 5 : x - 5, y)
+        ctx.lineTo(right ? x - 3 : x + 3, y - 6)
+        ctx.lineTo(right ? x - 3 : x + 3, y + 6)
+        ctx.fill()
+        ctx.fillStyle = Math.floor(this.time * 3) % 2 ? '#fac775' : '#ffe2a8'
+        ctx.beginPath()
+        ctx.moveTo(right ? x + 4 : x - 4, y)
+        ctx.lineTo(right ? x - 2 : x + 2, y - 4.5)
+        ctx.lineTo(right ? x - 2 : x + 2, y + 4.5)
+        ctx.fill()
+        this.markerScreen = { x: right ? SCREEN_W - 30 : 30, y: y + 8 }
+      } else if (sp) {
+        const far = !cam.projectPoint(c.rx, c.rz)
+        const bob = Math.sin(this.time * 3) * 2
+        const y = Math.max(8, sp.sy - Math.max(14, sp.scale * 7) + bob)
+        const r = far ? 4 : 3
+        // A light beam down to the ground makes far targets easy to spot.
+        ctx.globalAlpha = far ? 0.55 : 0.3
+        rect(ctx, '#fac775', Math.round(sp.sx), y + r, 1, Math.max(0, sp.sy - y - r))
+        ctx.globalAlpha = 1
+        ctx.fillStyle = '#16182c'
+        ctx.beginPath()
+        ctx.moveTo(sp.sx, y - r - 1)
+        ctx.lineTo(sp.sx + r + 1, y)
+        ctx.lineTo(sp.sx, y + r + 1)
+        ctx.lineTo(sp.sx - r - 1, y)
+        ctx.fill()
+        ctx.fillStyle = Math.floor(this.time * 3) % 2 ? '#fac775' : '#ffe2a8'
+        ctx.beginPath()
+        ctx.moveTo(sp.sx, y - r)
+        ctx.lineTo(sp.sx + r, y)
+        ctx.lineTo(sp.sx, y + r)
+        ctx.lineTo(sp.sx - r, y)
+        ctx.fill()
+        this.markerScreen = { x: sp.sx, y: y - r - 7 }
+      } else this.markerScreen = null
+    } else this.markerScreen = null
     if (this.boss) {
       for (const o of this.boss.orbs) {
         const c = cam.toCamera(o.x, o.z)
@@ -2459,7 +3298,7 @@ export class Game {
     else if (!surface) {
       const pc = cam.toCamera(player.x, player.z)
       const pp = cam.projectPoint(pc.rx, pc.rz)
-      drawDarkness(ctx, pp?.sx ?? SCREEN_W / 2, (pp?.sy ?? 140) - 8)
+      drawDarkness(ctx, pp?.sx ?? SCREEN_W / 2, (pp?.sy ?? 140) - 8, this.buffs.glow > 0)
       for (const g of this.glows) {
         rect(ctx, g.color, g.x, g.y, 1, 1)
         if (Math.sin(this.time * 3 + g.x) > 0) rect(ctx, '#ffffff', g.x, g.y - 1, 1, 1)
@@ -2492,6 +3331,10 @@ export class Game {
       prompt: this.deadTimer > 0 ? null : this.interaction,
       muted: this.audio.muted,
       showMinimap: this.showMinimap,
+      waypoint: this.waypoint,
+      food: this.tracker.act >= 2 && this.onSurface && this.eaters().length > 0
+        ? { meals: this.foodBin, eaters: this.eaters().length, next: Math.max(0, this.foodTimer), hungry: this.eaters().filter((s) => s.hunger).length }
+        : null,
       combat: {
         hp: this.hp,
         maxHp: PLAYER_MAX_HP,
@@ -2514,9 +3357,22 @@ export class Game {
       this.text.text(b.name, SCREEN_W / 2, 41, '#efe3ff', { size: 5, align: 'center' })
       if (bossVulnerable(b) && Math.floor(this.time * 4) % 2) this.text.text('NOW! STRIKE IT', SCREEN_W / 2, 56, '#fac775', { size: 5.5, align: 'center' })
     }
+    if (this.markerScreen && this.waypoint && !this.tablet.visible && !this.inventory.visible) {
+      const d = Math.round(this.distanceTo(this.waypoint.x, this.waypoint.z))
+      if (d > 4) this.text.text(`${this.waypoint.label} ${d}m`, this.markerScreen.x, this.markerScreen.y, '#fac775', { size: 4.5, align: 'center' })
+    }
+    const buffText = [this.buffs.quick > 0 ? `QUICK ${Math.ceil(this.buffs.quick)}s` : '', this.buffs.steady > 0 ? `STEADY ${Math.ceil(this.buffs.steady)}s` : '', this.buffs.glow > 0 ? `GLOWING ${Math.ceil(this.buffs.glow)}s` : ''].filter(Boolean).join(' · ')
+    if (buffText && !this.tablet.visible) this.text.text(buffText, 70, SCREEN_H - 30, '#9fe1cb', { size: 4.5 })
+    if (this.savedFlash > 0) {
+      this.text.alpha = Math.min(1, this.savedFlash)
+      this.text.text('SAVED', SCREEN_W - 6, SCREEN_H - 16, '#5dcaa5', { size: 4.5, align: 'right' })
+      this.text.alpha = 1
+    }
     for (const l of this.labels) {
+      const w = Math.max(this.text.measure(l.name, { size: 4.8 }), l.job ? this.text.measure(l.job, { size: 4, weight: 500 }) : 0) + 6
+      this.text.rect('rgba(6,5,24,0.72)', l.x - w / 2, l.y - 1, w, l.job ? 11.5 : 6.5)
       this.text.text(l.name, l.x, l.y, '#fac775', { size: 4.8, align: 'center' })
-      if (l.job) this.text.text(l.job, l.x, l.y + 5.5, '#9aa2cf', { size: 4, align: 'center', weight: 500 })
+      if (l.job) this.text.text(l.job, l.x, l.y + 5.5, '#e8ecff', { size: 4, align: 'center', weight: 500 })
     }
     this.text.alpha = 1
     const view = this.tabletView()
@@ -2544,7 +3400,7 @@ export class Game {
 
   private drawSurface(): void {
     const { ctx } = this
-    const pal = this.onSurface ? { rim: '#e9e5cc', rim2: '#c3c9e3', band: '#7f88b4', base: '#9aa2c8' } : this.scene === 'ship' ? SHIP_GROUND : CAVE_GROUND
+    const pal = this.onSurface ? this.biomePalette() : this.scene === 'ship' ? SHIP_GROUND : CAVE_GROUND
     for (let sx = 0; sx < SCREEN_W; sx++) {
       const yf = horizonY(sx + 0.5)
       const y0 = Math.floor(yf)
@@ -2629,7 +3485,7 @@ export class Game {
     const [ox, oz] = cam.rotate(-0.5, -0.5)
     fillPolygon(ctx, '#2e3560', cam.projectPolygon(ring(pos.rx + ox, pos.rz + oz, 1.2 - Math.min(0.6, lift * 0.12), ground, 14)))
 
-    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.heldItem() === 'blaster', pickaxe: this.tracker.toolTier(), held: this.heldItem() })
+    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.heldItem() === 'blaster', pickaxe: this.tracker.toolTier(), held: this.heldItem(), heldIcon: HAS_ITEM_PNG.has(this.heldItem() as ItemId) ? ICONS[this.heldItem() as ItemId] : null })
     if (sunk) ctx.restore()
   }
 }
@@ -2640,4 +3496,23 @@ function isSolidAtPad(world: World, x: number, z: number): boolean {
 
 function boulderAtPad(world: World, x: number, z: number, pad: number): boolean {
   return !!boulderAt(world, x, z, pad)
+}
+
+const BIOMES: Record<string, string[]> = {
+  'crash-site': ['#e9e5cc', '#c3c9e3', '#7f88b4', '#9aa2c8'],
+  stillness: ['#f2f0e2', '#d6dbee', '#8f97c2', '#b3b9d8'],
+  'dust-basin': ['#efe0c4', '#cdbfa8', '#8a7c6c', '#ad9e8a'],
+  'glass-fields': ['#dff0ff', '#b8d0f0', '#6f86b8', '#8fa6cf'],
+  shattered: ['#c9c6b8', '#a3a7c4', '#5c607e', '#7a7f9e'],
+  'frost-ridge': ['#ffffff', '#e6f2ff', '#9fb8d0', '#c7d9ea'],
+  highlands: ['#ead6cf', '#c4b0b8', '#7e6a78', '#a08c96'],
+}
+
+function hexRgb(hex: string): number[] {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function rgbHex(c: number[]): string {
+  return `#${c.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`
 }

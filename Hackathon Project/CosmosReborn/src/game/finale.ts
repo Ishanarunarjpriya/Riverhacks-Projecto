@@ -3,6 +3,8 @@ import { SCREEN_CX, SCREEN_H, SCREEN_W } from './constants'
 import { clamp, createRng } from './math'
 import { ellipse, rect, type Ctx } from './pixel'
 import type { TextLayer } from './text'
+import { preloadVoice, speak } from './voice'
+import { SHIP_SPRITE, spriteFrame } from './sprites'
 
 export type Ending = 'together' | 'captured'
 
@@ -34,6 +36,8 @@ export interface FinaleInput {
 type Phase = 'launch' | 'fight' | 'reentry' | 'brawl' | 'leap' | 'captured' | 'end'
 
 const KILLS_NEEDED = 10
+/** Launch cutscene shots, in seconds from the start of the launch phase. */
+const LAUNCH = { board: 0, countdown: 4.5, ignite: 8.6, liftoff: 9.2, climb: 13, total: 17.5 } as const
 const FIGHT_TIME = 50
 
 export class Finale {
@@ -60,6 +64,8 @@ export class Finale {
 
   constructor(ending: Ending) {
     this.ending = ending
+    preloadVoice('Fuel full. Hull sealed. For the first time, nobody is jamming me. Go.', 'moonlink')
+    for (const [line, voice] of ending === 'together' ? ([['Signal clear. First time in ten years. Welcome home.', 'moonlink']] as const) : ([['You promised. You promised all of us.', 'maya'], ['Retrieval complete. Helmets on. Do not look it in the eye.', 'stranger'], ['This is not how it ends.', 'narrator']] as const)) preloadVoice(line, voice)
     const rng = createRng(77)
     for (let i = 0; i < 140; i++) this.stars.push({ x: rng() * SCREEN_W, y: rng() * SCREEN_H, s: 0.3 + rng() * 2 })
   }
@@ -67,6 +73,8 @@ export class Finale {
   private go(phase: Phase): void {
     this.phase = phase
     this.phaseT = 0
+    if (phase === 'brawl') speak('You promised. You promised all of us.', 'maya')
+    if (phase === 'captured') speak('Retrieval complete. Helmets on. Do not look it in the eye.', 'stranger')
   }
 
   update(dt: number, input: FinaleInput, audio: GameAudio): void {
@@ -79,9 +87,17 @@ export class Finale {
     this.lastJump = input.jump
 
     if (this.phase === 'launch') {
-      if (this.phaseT > 0.05 && this.phaseT - dt <= 0.05) audio.play('rumble')
-      if (this.phaseT > 3 && this.phaseT - dt <= 3) audio.play('crash')
-      if (this.phaseT > 6.5) this.go(this.ending === 'together' ? 'fight' : 'brawl')
+      const t = this.phaseT
+      const at = (mark: number) => t >= mark && t - dt < mark
+      if (at(0.6)) speak('Fuel full. Hull sealed. For the first time, nobody is jamming me. Go.', 'moonlink')
+      for (let i = 0; i < 4; i++) if (at(LAUNCH.countdown + 0.3 + i)) audio.play('select')
+      if (at(LAUNCH.countdown + 0.1)) audio.play('alarm')
+      if (at(LAUNCH.ignite)) audio.play('crash')
+      if (at(LAUNCH.liftoff)) audio.play('rumble')
+      if (at(LAUNCH.liftoff + 1.6)) audio.play('rumble')
+      if (at(LAUNCH.climb + 1.2)) audio.play('break')
+      if (pressedAct && t > 1) this.phaseT = LAUNCH.total
+      if (this.phaseT >= LAUNCH.total) this.go(this.ending === 'together' ? 'fight' : 'brawl')
       return
     }
 
@@ -92,7 +108,7 @@ export class Finale {
       this.cooldown -= dt
       if (input.fire && this.cooldown <= 0) {
         this.cooldown = 0.22
-        this.bolts.push({ x: 74, y: this.shipY, vx: 220, vy: 0, friendly: true })
+        this.bolts.push({ x: 82, y: this.shipY + 1, vx: 220, vy: 0, friendly: true })
         audio.play('shoot')
       }
       this.spawn -= dt
@@ -127,7 +143,7 @@ export class Finale {
               audio.play('enemyDie')
             }
           }
-        } else if (Math.abs(b.x - 60) < 9 && Math.abs(b.y - this.shipY) < 6) {
+        } else if (Math.abs(b.x - 60) < 17 && Math.abs(b.y - this.shipY) < 6) {
           b.x = -9999
           this.hp--
           this.flash = 0.25
@@ -154,7 +170,10 @@ export class Finale {
     }
 
     if (this.phase === 'reentry') {
-      if (this.phaseT > 3 && this.phaseT - dt <= 3) audio.play('rumble')
+      if (this.phaseT > 3 && this.phaseT - dt <= 3) {
+        audio.play('rumble')
+        speak('Signal clear. First time in ten years. Welcome home.', 'moonlink')
+      }
       if (this.phaseT > 12) this.go('end')
       return
     }
@@ -188,6 +207,7 @@ export class Finale {
     }
 
     if (this.phase === 'captured') {
+      if (this.phaseT > 5 && this.phaseT - dt <= 5) speak('This is not how it ends.', 'narrator')
       if (this.phaseT > 9) {
         this.rewind = true
         this.done = true
@@ -222,34 +242,212 @@ export class Finale {
 
   private drawLaunch(ctx: Ctx, text: TextLayer): void {
     const t = this.phaseT
-    for (const s of this.stars) rect(ctx, '#6b66a8', s.x, s.y * 0.6, 1, 1)
-    rect(ctx, '#9aa2c8', 0, 140, SCREEN_W, 40)
-    rect(ctx, '#5b6496', SCREEN_CX - 24, 136, 48, 4)
-    const lift = t < 3 ? 0 : (t - 3) ** 2 * 14
-    const shake = t < 3 ? (Math.random() - 0.5) * t : 0
-    const rx = SCREEN_CX + shake
-    const ry = 136 - lift
-    rect(ctx, '#e6e6ee', rx - 6, ry - 50, 12, 46)
-    rect(ctx, '#e0884a', rx - 6, ry - 30, 12, 3)
-    rect(ctx, '#9fe1ff', rx - 2, ry - 42, 4, 3)
-    rect(ctx, '#e24b4a', rx - 4, ry - 58, 8, 8)
-    rect(ctx, '#5b6496', rx - 9, ry - 10, 4, 10)
-    rect(ctx, '#5b6496', rx + 5, ry - 10, 4, 10)
-    if (t > 1.5) {
-      for (let i = 0; i < 26; i++) {
-        const fy = ry + Math.random() * (10 + lift * 0.3)
-        rect(ctx, i < 8 ? '#fff6d8' : i < 18 ? '#fac775' : '#e0884a', rx - 5 + Math.random() * 10, fy, 2, 2)
+    if (t < LAUNCH.countdown) this.drawLaunchPad(ctx, text, t)
+    else if (t < LAUNCH.liftoff) this.drawIgnition(ctx, text, t - LAUNCH.countdown)
+    else if (t < LAUNCH.climb) this.drawLiftoff(ctx, text, t - LAUNCH.liftoff)
+    else this.drawClimb(ctx, text, t - LAUNCH.climb)
+    // Cut fades between shots.
+    for (const cut of [LAUNCH.countdown, LAUNCH.liftoff, LAUNCH.climb]) {
+      const d = Math.abs(t - cut)
+      if (d < 0.25) {
+        ctx.fillStyle = `rgba(5,4,15,${1 - d / 0.25})`
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
       }
     }
-    const count = Math.max(0, 10 - Math.floor(t * 3.4))
-    if (t < 3) text.text(count > 0 ? String(count) : 'LIFTOFF', SCREEN_CX, 40, '#fac775', { size: 14, align: 'center' })
-    if (t > 4.5) {
-      ctx.fillStyle = `rgba(5,4,15,${clamp((t - 4.5) / 2, 0, 1)})`
+    if (t > LAUNCH.total - 1.5) {
+      ctx.fillStyle = `rgba(5,4,15,${clamp((t - (LAUNCH.total - 1.5)) / 1.3, 0, 1)})`
       ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
+    }
+    if (t > 1) text.text('[E] SKIP', SCREEN_W - 6, SCREEN_H - 10, '#5b6496', { size: 4.5, align: 'right' })
+  }
+
+  private moonSky(ctx: Ctx, earthX: number, earthY: number, earthR: number): void {
+    ctx.fillStyle = '#05040f'
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
+    for (const s of this.stars) rect(ctx, s.s > 1.6 ? '#d9d6ff' : '#4b4880', s.x, s.y * 0.75, 1, 1)
+    ellipse(ctx, '#1d3f86', earthX, earthY, earthR, earthR)
+    ellipse(ctx, '#3b7dd8', earthX - earthR * 0.15, earthY - earthR * 0.1, earthR * 0.8, earthR * 0.8)
+    ellipse(ctx, '#3fae7c', earthX - earthR * 0.35, earthY - earthR * 0.2, earthR * 0.3, earthR * 0.22)
+    ellipse(ctx, '#e8f6ff', earthX + earthR * 0.25, earthY + earthR * 0.3, earthR * 0.35, earthR * 0.12)
+  }
+
+  /** The rocket, nose up, base at (x, y). Scale 1 is 60px tall. */
+  private drawRocket(ctx: Ctx, x: number, y: number, scale: number, lit: boolean): void {
+    const k = scale
+    const r = (c: string, dx: number, dy: number, w: number, h: number) => rect(ctx, c, Math.round(x + dx * k), Math.round(y + dy * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)))
+    r('#5b6496', -12, -14, 5, 14)
+    r('#5b6496', 7, -14, 5, 14)
+    r('#3f4878', -5, -4, 10, 4)
+    r('#c9cbe0', -7, -52, 14, 48)
+    r('#ffffff', -7, -52, 4, 48)
+    r('#e0884a', -7, -34, 14, 3)
+    r('#e0884a', -7, -16, 14, 3)
+    r('#16182c', -3, -46, 6, 5)
+    r(lit ? '#9fe1ff' : '#3f6f9a', -2, -45, 4, 3)
+    r('#e24b4a', -6, -58, 12, 6)
+    r('#e24b4a', -4, -62, 8, 4)
+    r('#ff8a7a', -2, -64, 4, 2)
+    r('#d4a43c', -2, -27, 4, 8)
+  }
+
+  private flame(ctx: Ctx, x: number, y: number, len: number, width: number): void {
+    for (let i = 0; i < len * 1.6; i++) {
+      const f = Math.random()
+      const fy = y + f * len
+      const spread = (1 - f * 0.6) * width
+      rect(ctx, f < 0.25 ? '#fff6d8' : f < 0.6 ? '#fac775' : '#e0884a', x - spread / 2 + Math.random() * spread, fy, 2, 2)
     }
   }
 
-  private drawShip(ctx: Ctx, x: number, y: number): void {
+  private dust(ctx: Ctx, x: number, y: number, radius: number, alpha: number, seed: number): void {
+    const rng = createRng(seed)
+    for (let i = 0; i < 40; i++) {
+      const a = rng() * Math.PI
+      const d = rng() * radius
+      const size = 3 + rng() * 6
+      ctx.globalAlpha = alpha * (0.4 + rng() * 0.6)
+      rect(ctx, rng() < 0.5 ? '#9aa2c8' : '#c9cbe0', x + Math.cos(a) * d * (rng() < 0.5 ? -1 : 1) - size / 2, y - Math.sin(a) * d * 0.35 - size / 2, size, size)
+    }
+    ctx.globalAlpha = 1
+  }
+
+  private drawLaunchPad(ctx: Ctx, text: TextLayer, t: number): void {
+    this.moonSky(ctx, 250, 34, 16)
+    rect(ctx, '#7f88b4', 0, 128, SCREEN_W, 52)
+    rect(ctx, '#9aa2c8', 0, 128, SCREEN_W, 3)
+    for (const [cx, cy, cr] of [[40, 150, 10], [270, 160, 14], [190, 170, 6]] as const) ellipse(ctx, '#6c719a', cx, cy, cr, cr * 0.3)
+    const px = 150
+    // Pad and gantry.
+    rect(ctx, '#3f4878', px - 26, 130, 52, 5)
+    rect(ctx, '#5b6496', px - 26, 130, 52, 1)
+    for (let gy = 70; gy < 130; gy += 8) {
+      rect(ctx, '#9aa0b8', px + 22, gy, 2, 8)
+      rect(ctx, '#9aa0b8', px + 30, gy, 2, 8)
+      rect(ctx, '#7c85b4', px + 22, gy, 10, 1)
+    }
+    rect(ctx, '#9aa0b8', px + 8, 86, 16, 2)
+    if (Math.floor(t * 2) % 2 === 0) rect(ctx, '#e24b4a', px + 26, 66, 2, 2)
+    this.drawRocket(ctx, px, 130, 1, t > 1.5)
+    // Settlement lights in the distance.
+    for (const [hx, hw] of [[30, 16], [58, 12], [92, 14]] as const) {
+      rect(ctx, '#c9cbe0', hx, 118, hw, 10)
+      rect(ctx, '#e0884a', hx, 122, hw, 1)
+      rect(ctx, '#fac775', hx + 3, 120, 2, 2)
+    }
+    // People: boarding (together) or watching from the houses (captured).
+    const ramp = { x: px - 30, y: 130 }
+    rect(ctx, '#9aa0b8', ramp.x, ramp.y - 1, 26, 1)
+    const people = ['#e0884a', '#5dcaa5', '#7fb2ff', '#c9a6ff', '#fac775', '#ff8a7a']
+    people.forEach((suit, i) => {
+      let hx: number
+      if (this.ending === 'together') {
+        const p = clamp((t - i * 0.45) / 2.6, 0, 1)
+        if (p >= 1) return
+        hx = 70 + i * 4 + p * (px - 74 - i * 4)
+      } else {
+        hx = 34 + i * 12
+      }
+      const hy = 130 - (this.ending === 'together' && hx > ramp.x ? 2 : 0)
+      const step = Math.floor((t + i) * 6) % 2
+      rect(ctx, '#e6e6ee', hx - 1, hy - 4, 1, 4)
+      rect(ctx, '#e6e6ee', hx + 1, hy - 4, 1, 4 - step)
+      rect(ctx, suit, hx - 2, hy - 9, 5, 5)
+      rect(ctx, '#e2c49a', hx - 1, hy - 12, 3, 3)
+      if (this.ending === 'captured' && Math.floor(t * 3 + i) % 4 === 0) rect(ctx, '#e2c49a', hx + 3, hy - 12, 1, 3)
+    })
+    const caption = this.ending === 'together' ? 'EVERYONE GOES. ONE BY ONE THEY CLIMB ABOARD.' : 'YOU BOARD ALONE. THE SETTLEMENT WATCHES FROM THE DOORWAYS.'
+    const a = clamp((t - 0.6) / 0.5, 0, 1)
+    text.alpha = a
+    text.text(caption, SCREEN_CX, 14, '#d9dcef', { size: 6, align: 'center' })
+    text.text('MOONLINK: "FUEL FULL. HULL SEALED. NOBODY IS JAMMING ME. GO."', SCREEN_CX, 24, '#5dcaa5', { size: 5, align: 'center' })
+    text.alpha = 1
+  }
+
+  private drawIgnition(ctx: Ctx, text: TextLayer, t: number): void {
+    const igniting = t > LAUNCH.ignite - LAUNCH.countdown
+    const shake = igniting ? (Math.random() - 0.5) * 4 : (Math.random() - 0.5) * t * 0.3
+    ctx.fillStyle = '#05040f'
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
+    for (const s of this.stars) rect(ctx, '#4b4880', s.x, s.y * 0.5, 1, 1)
+    const rx = SCREEN_CX + 50 + shake
+    rect(ctx, '#7f88b4', 0, 156, SCREEN_W, 24)
+    rect(ctx, '#3f4878', rx - 70, 150, 140, 8)
+    // Close-up on the engines: rocket drawn large so its lower half fills the frame.
+    for (const gx of [-40, 40]) rect(ctx, '#5b6496', rx + gx - 2, 120, 4, 30)
+    if (t > 2.2) {
+      const power = igniting ? 1 : (t - 2.2) / 1.9
+      this.flame(ctx, rx, 124, 10 + power * 22, 8 + power * 14)
+    }
+    this.drawRocket(ctx, rx, 124, 2.2, true)
+    if (t > 2.2) {
+      const power = igniting ? 1 : (t - 2.2) / 1.9
+      this.dust(ctx, rx, 154, 40 + power * 130, 0.5 + power * 0.4, Math.floor(this.t * 12))
+    }
+    if (igniting) {
+      ctx.fillStyle = `rgba(255,246,216,${0.35 * Math.random()})`
+      ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
+    }
+    const n = 4 - Math.floor(t - 0.3)
+    const label = t < 0.3 ? 'T-MINUS' : n > 0 ? String(n) : 'IGNITION'
+    text.text(label, 70, 60, n > 0 && t >= 0.3 ? '#fac775' : '#ff8a7a', { size: label.length > 2 ? 13 : 24, align: 'center', weight: 700 })
+  }
+
+  private drawLiftoff(ctx: Ctx, text: TextLayer, t: number): void {
+    this.moonSky(ctx, 250, 34, 16)
+    const groundY = 128 + t * t * 4
+    rect(ctx, '#7f88b4', 0, groundY, SCREEN_W, SCREEN_H)
+    rect(ctx, '#9aa2c8', 0, groundY, SCREEN_W, 3)
+    rect(ctx, '#3f4878', 124, groundY + 2, 52, 5)
+    const rise = t * t * 9
+    const ry = 130 - rise
+    const shake = (Math.random() - 0.5) * Math.max(0, 2 - t * 0.5)
+    this.flame(ctx, 150 + shake, ry, 26 + t * 10, 12)
+    // Exhaust trail left behind.
+    for (let i = 0; i < 30; i++) {
+      const ty = ry + 20 + Math.random() * (groundY - ry)
+      ctx.globalAlpha = 0.35
+      rect(ctx, '#c9cbe0', 146 + (Math.random() - 0.5) * 10, ty, 3, 3)
+    }
+    ctx.globalAlpha = 1
+    this.drawRocket(ctx, 150 + shake, ry, 1, true)
+    this.dust(ctx, 150, groundY + 4, 30 + t * 70, clamp(1 - t / 4, 0, 1), 9)
+    text.text('LIFTOFF', SCREEN_CX, 16, '#fac775', { size: 12, align: 'center', weight: 700 })
+  }
+
+  private drawClimb(ctx: Ctx, text: TextLayer, t: number): void {
+    // Looking back down: the Moon curves away below, the Earth hangs ahead.
+    this.moonSky(ctx, 70 + t * 3, 40 - t * 2, 22 + t * 3)
+    const moonR = 420 - t * 30
+    ellipse(ctx, '#5b6496', SCREEN_CX, SCREEN_H + moonR - 40 + t * 9, moonR, moonR)
+    ellipse(ctx, '#7f88b4', SCREEN_CX, SCREEN_H + moonR - 38 + t * 9, moonR - 3, moonR - 3)
+    for (const [cx, cr] of [[60, 10], [190, 16], [260, 8]] as const) ellipse(ctx, '#6c719a', cx, SCREEN_H - 20 + t * 9, cr, cr * 0.3)
+    const rx = 170 + t * 6
+    const ry = 110 - t * 14
+    const sep = t > 1.2
+    if (sep) {
+      // Spent booster tumbling away after stage separation.
+      const d = t - 1.2
+      rect(ctx, '#9aa0b8', rx - 6 - d * 4, ry + 4 + d * 14, 5, 9)
+      if (d < 0.25) {
+        ctx.fillStyle = `rgba(255,246,216,${0.6 * (1 - d / 0.25)})`
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
+      }
+    }
+    this.flame(ctx, rx, ry, sep ? 10 : 16, 5)
+    this.drawRocket(ctx, rx, ry, 0.4, true)
+    const a = clamp((t - 1.8) / 0.6, 0, 1) * clamp((LAUNCH.total - LAUNCH.climb - 0.3 - t) / 1.1, 0, 1)
+    text.alpha = a
+    text.text('LEAVING THE MOON', SCREEN_CX, 20, '#d9dcef', { size: 9, align: 'center', weight: 700 })
+    text.text(this.ending === 'together' ? 'EVERY SEAT IS FULL.' : 'ONE SEAT IS FULL. THE REST ARE EMPTY.', SCREEN_CX, 34, this.ending === 'together' ? '#9fe1cb' : '#ff8a7a', { size: 6, align: 'center' })
+    text.alpha = 1
+  }
+
+  private drawShip(ctx: Ctx, x: number, y: number, text?: TextLayer): void {
+    const frame = spriteFrame(SHIP_SPRITE, this.t)
+    if (frame && text) {
+      text.image(frame, 0, 0, SHIP_SPRITE.width, SHIP_SPRITE.height, x - 20, y - 10, 40, 20)
+      return
+    }
     rect(ctx, '#e6e6ee', x - 10, y - 3, 18, 6)
     rect(ctx, '#e24b4a', x + 8, y - 2, 4, 4)
     rect(ctx, '#9fe1ff', x + 2, y - 2, 3, 2)
@@ -260,7 +458,7 @@ export class Finale {
   private drawFight(ctx: Ctx, text: TextLayer): void {
     this.starfield(ctx, 120)
     ellipse(ctx, '#9aa2c8', -30, SCREEN_H + 60, 110, 110)
-    this.drawShip(ctx, 60, this.shipY)
+    this.drawShip(ctx, 60, this.shipY, text)
     for (const c of this.crafts) {
       rect(ctx, '#2a2f4c', c.x - 8, c.y - 4, 16, 8)
       rect(ctx, '#3a4062', c.x - 4, c.y - 6, 8, 3)
@@ -290,7 +488,7 @@ export class Finale {
       ctx.fillStyle = `rgba(255,140,60,${heat * 0.35})`
       ctx.fillRect(0, 0, SCREEN_W, SCREEN_H)
     }
-    this.drawShip(ctx, SCREEN_CX + (t > 7 ? (Math.random() - 0.5) * 3 : 0), SCREEN_H / 2)
+    this.drawShip(ctx, SCREEN_CX + (t > 7 ? (Math.random() - 0.5) * 3 : 0), SCREEN_H / 2, text)
     if (t > 1 && t < 6) text.text('EARTH.', SCREEN_CX, 30, '#d9dcef', { size: 9, align: 'center' })
     if (t > 3 && t < 6.5) text.text('MOONLINK: SIGNAL CLEAR. FIRST TIME IN TEN YEARS. WELCOME HOME.', SCREEN_CX, 44, '#5dcaa5', { size: 5.5, align: 'center' })
     if (t > 9.5) {

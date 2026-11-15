@@ -59,6 +59,15 @@ export class BlockGrid {
     return top
   }
 
+  toSave(): BlockColumn[] {
+    return [...this.cols.values()].map((c) => ({ gx: c.gx, gz: c.gz, stack: [...c.stack] }))
+  }
+
+  loadSave(cols: BlockColumn[]): void {
+    this.cols.clear()
+    for (const c of cols) this.cols.set(`${c.gx},${c.gz}`, { gx: c.gx, gz: c.gz, stack: [...c.stack] })
+  }
+
   place(gx: number, gz: number, type: BlockType): boolean {
     const key = `${gx},${gz}`
     const col = this.cols.get(key) ?? { gx, gz, stack: [] }

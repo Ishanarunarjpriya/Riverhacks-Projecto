@@ -17,7 +17,7 @@ const MAP_PX_PER_UNIT = 1 / 6
 const MAP_SIZE = 96
 const MAP_TEX = Math.round(WORLD_SIZE * MAP_PX_PER_UNIT)
 
-type App = 'map' | 'quests' | 'ai' | 'scan'
+export type App = 'map' | 'quests' | 'ai' | 'scan'
 type Screen = 'home' | App
 
 const TILES: { app: App; label: string; color: string }[] = [
@@ -51,6 +51,7 @@ export interface TabletView {
   tracker: QuestTracker
   underground: boolean
   lifeSigns: LifeSign[]
+  waypoint?: { x: number; z: number; label: string } | null
 }
 
 export interface LifeSign {
@@ -66,6 +67,9 @@ export class Tablet {
   private boot = 0
   private screen: Screen = 'home'
   private selected = 0
+  isUnlocked: (app: App) => boolean = () => true
+  lockHint: (app: App) => string = () => ''
+  private lockedMsg: { text: string; t: number } | null = null
   private appTime = 0
   private mapTexture: HTMLCanvasElement | null = null
   private fogTexture: HTMLCanvasElement | null = null
@@ -137,6 +141,10 @@ export class Tablet {
     this.t = clamp(this.t + ((this.open ? 1 : -1) * dt) / SLIDE_TIME, 0, 1)
     this.boot = this.open && this.t >= 1 ? this.boot + dt : 0
     this.appTime += dt
+    if (this.lockedMsg) {
+      this.lockedMsg.t -= dt
+      if (this.lockedMsg.t <= 0) this.lockedMsg = null
+    }
   }
 
   draw(ctx: Ctx, time: number, view: TabletView): void {
@@ -185,6 +193,14 @@ export class Tablet {
         rect(ctx, border, gx, gy, 1, TILE_H)
         rect(ctx, border, gx + TILE_W - 1, gy, 1, TILE_H)
         drawIcon(ctx, i, color, gx + TILE_W / 2, gy + 14, time)
+        if (!this.isUnlocked(TILES[i].app)) {
+          ctx.fillStyle = 'rgba(5,7,15,0.72)'
+          ctx.fillRect(gx + 1, gy + 1, TILE_W - 2, TILE_H - 2)
+          rect(ctx, '#5a63a0', gx + TILE_W / 2 - 3, gy + 10, 6, 5)
+          rect(ctx, '#5a63a0', gx + TILE_W / 2 - 2, gy + 7, 1, 3)
+          rect(ctx, '#5a63a0', gx + TILE_W / 2 + 1, gy + 7, 1, 3)
+          rect(ctx, '#5a63a0', gx + TILE_W / 2 - 2, gy + 7, 4, 1)
+        }
       })
     } else if (this.screen === 'map') {
       this.drawMap(ctx, time, SX, SY, view)
@@ -205,7 +221,7 @@ export class Tablet {
         const dz = wrap(sign.z - view.playerZ)
         const fwd = dx * Math.sin(view.heading) + dz * Math.cos(view.heading)
         const side = dx * Math.cos(view.heading) - dz * Math.sin(view.heading)
-        const scale = 38 / 260
+        const scale = 38 / (view.tracker.satelliteOnline ? 520 : 260)
         let bx = side * scale
         let by = -fwd * scale
         const len = Math.hypot(bx, by)
@@ -238,7 +254,8 @@ export class Tablet {
       this.forEachTile(SX, SY, (i, color, gx, gy) => {
         text.text(TILES[i].label, gx + TILE_W / 2, gy + TILE_H - 10, color, { align: 'center', size: 6.5 })
       })
-      if (this.ready) text.text('← → CHOOSE · ENTER OPEN · TAB CLOSE', SX + SW / 2, SY + SH - 10, '#5a63a0', { align: 'center', size: 4.8 })
+      if (this.lockedMsg) text.text(`LOCKED: ${this.lockedMsg.text}`, SX + SW / 2, SY + SH - 10, '#ff8a7a', { align: 'center', size: 4.8 })
+      else if (this.ready) text.text('← → CHOOSE · ENTER OPEN · TAB CLOSE', SX + SW / 2, SY + SH - 10, '#5a63a0', { align: 'center', size: 4.8 })
       return
     }
 
@@ -253,15 +270,22 @@ export class Tablet {
         .map((s) => ({ ...s, d: Math.hypot(wrap(s.x - view.playerX), wrap(s.z - view.playerZ)) }))
         .sort((a, b) => a.d - b.d)
       text.text(`LIFE SIGNS: ${signs.length}`, SX + 8, SY + 16, '#e0884a', { size: 5.5 })
-      signs.slice(0, 6).forEach((s, i) => {
-        text.text(s.label, SX + 8, SY + 26 + i * 8, s.color, { size: 4.8 })
-        text.text(`${Math.round(s.d)}m`, SX + 54, SY + 26 + i * 8, '#9aa2cf', { size: 4.8 })
+      const arrows = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖']
+      signs.slice(0, 9).forEach((s, i) => {
+        const bearing = Math.atan2(wrap(s.x - view.playerX), wrap(s.z - view.playerZ)) - view.heading
+        const idx = ((Math.round(bearing / (Math.PI / 4)) % 8) + 8) % 8
+        text.text(`${arrows[idx]} ${s.label}`, SX + 6, SY + 25 + i * 7, s.color, { size: 4.6 })
+        text.text(`${Math.round(s.d)}m`, SX + 62, SY + 25 + i * 7, '#9aa2cf', { size: 4.6 })
       })
       text.text('UP = THE WAY YOU FACE', SX + SW / 2, SY + SH - 10, '#5a63a0', { size: 4.8, align: 'center' })
     }
   }
 
   private launch(app: App): void {
+    if (!this.isUnlocked(app)) {
+      this.lockedMsg = { text: this.lockHint(app), t: 2.5 }
+      return
+    }
     this.screen = app
     this.appTime = 0
   }
@@ -360,9 +384,17 @@ export class Tablet {
     }
 
     for (const a of ANOMALIES) {
-      if (!view.tracker.anomalies.includes(a.id)) continue
+      const done = view.tracker.anomalies.includes(a.id)
+      if (!done && !view.tracker.dishTuned) continue
       const [x, y] = this.toMap(view, a.x, a.z, SX, SY)
-      rect(ctx, '#7c6fb0', x - 1, y - 1, 3, 3)
+      rect(ctx, done ? '#7c6fb0' : Math.floor(time * 2) % 2 ? '#e9dcff' : '#c9a6ff', x - 1, y - 1, 3, 3)
+    }
+    if (view.tracker.satelliteOnline) {
+      for (const sign of view.lifeSigns) {
+        if (sign.label !== 'FOOD' && sign.label !== 'SURVIVOR') continue
+        const [x, y] = this.toMap(view, sign.x, sign.z, SX, SY)
+        rect(ctx, sign.color, x - 1, y - 1, 2, 2)
+      }
     }
     if (view.tracker.signalRevealed) {
       const [x, y] = this.toMap(view, HATCH.x, HATCH.z, SX, SY)
@@ -372,11 +404,38 @@ export class Tablet {
       rect(ctx, '#5b4a8a', x - 1, y - 1, 3, 3)
     }
 
+    if (view.waypoint) {
+      const [wx, wy] = this.toMap(view, view.waypoint.x, view.waypoint.z, SX, SY)
+      const px = Math.max(mx + 3, Math.min(mx + MAP_SIZE - 3, wx))
+      const py = Math.max(my + 3, Math.min(my + MAP_SIZE - 3, wy))
+      ctx.fillStyle = Math.floor(time * 3) % 2 ? '#fac775' : '#ffe2a8'
+      ctx.beginPath()
+      ctx.moveTo(px, py - 3)
+      ctx.lineTo(px + 3, py)
+      ctx.lineTo(px, py + 3)
+      ctx.lineTo(px - 3, py)
+      ctx.fill()
+    }
     const blink = Math.floor(time * 4) % 2 === 0
     const cx = mx + MAP_SIZE / 2
     const cy = my + MAP_SIZE / 2
-    rect(ctx, '#ffffff', cx - 1, cy - 1, 3, 3)
-    for (let k = 2; k <= 5; k++) rect(ctx, blink ? '#ffffff' : '#9fe1cb', cx + Math.sin(view.heading) * k, cy - Math.cos(view.heading) * k, 1, 1)
+    const hx = Math.sin(view.heading)
+    const hy = -Math.cos(view.heading)
+    ctx.fillStyle = '#0b1830'
+    ctx.beginPath()
+    ctx.moveTo(cx + hx * 6, cy + hy * 6)
+    ctx.lineTo(cx - hx * 4 + hy * 4.5, cy - hy * 4 - hx * 4.5)
+    ctx.lineTo(cx - hx * 4 - hy * 4.5, cy - hy * 4 + hx * 4.5)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = blink ? '#ffffff' : '#9fe1cb'
+    ctx.beginPath()
+    ctx.moveTo(cx + hx * 4.5, cy + hy * 4.5)
+    ctx.lineTo(cx - hx * 3 + hy * 3, cy - hy * 3 - hx * 3)
+    ctx.lineTo(cx - hx * 1.5, cy - hy * 1.5)
+    ctx.lineTo(cx - hx * 3 - hy * 3, cy - hy * 3 + hx * 3)
+    ctx.closePath()
+    ctx.fill()
     ctx.restore()
 
     rect(ctx, '#378add', mx - 1, my - 1, MAP_SIZE + 2, 1)

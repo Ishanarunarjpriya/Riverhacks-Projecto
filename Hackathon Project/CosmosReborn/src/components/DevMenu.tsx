@@ -74,6 +74,9 @@ export default function DevMenu({ game, onClose }: Props) {
         <Button label="Jump to Act III" onClick={act('Jumped to Act III', () => game.devJumpToAct(3))} />
         <Button label="Jump to Act IV" onClick={act('Jumped to Act IV', () => game.devJumpToAct(4))} />
         <Button label="Jump to Act V" onClick={act('Jumped to Act V', () => game.devJumpToAct(5))} />
+        <Button label="Play intro cutscene" onClick={act('Cutscene', () => game.devPlayCutscene('intro'))} />
+        <Button label="Play Act I ending cutscene" onClick={act('Cutscene', () => game.devPlayCutscene('earth'))} />
+        <Button label="Play Act II ending cutscene" onClick={act('Cutscene', () => game.devPlayCutscene('act2'))} />
         <Button label="Finish everything" onClick={act('Jumped to the end', () => game.devJumpToAct(99))} />
         <Button label="Reveal map" onClick={act('Map revealed', () => game.devRevealAll())} />
       </Section>
@@ -87,6 +90,11 @@ export default function DevMenu({ game, onClose }: Props) {
             ))}
         </Section>
       ))}
+
+      <Section title="Save">
+        <Button label="Save now" onClick={act('Save', () => game.devSaveNow())} />
+        <Button label="Delete save & restart" onClick={act('Deleted', () => game.devDeleteSave())} />
+      </Section>
 
       <Section title="Items">
         <Button label="Give resources" onClick={act('Resources added', () => game.devGiveResources())} />

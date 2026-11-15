@@ -68,6 +68,18 @@ export interface TrackerSnapshot {
 export type TrackerSound = 'pickup' | 'build' | 'complete' | 'quest' | 'clue' | 'discover' | 'inspect' | 'select'
 
 const MESSAGE_LIFETIME = 7
+/** How long each popup owns the screen. Popups queue so only one shows at a time. */
+export const TOAST_LIFE = 2.6
+export const TRANSMISSION_LIFE = 7
+const MAX_TOAST_WAIT = 10
+
+const SAVED_FIELDS = [
+  'inventory', 'itemOrder', 'collected', 'explored', 'inspected', 'mined', 'currentRegion', 'regions', 'scans', 'anomalies',
+  'signalRevealed', 'signalFound', 'talked', 'jobs', 'suppliesCollected', 'caveReached', 'defeated', 'suitSearched',
+  'waveSurvived', 'cavernFound', 'shipEntered', 'searched', 'blocksPlaced', 'placed', 'recruited', 'bosses', 'equipped',
+  'promised', 'blueprints', 'raids', 'repairs', 'choice', 'preflight', 'finalRaidWon', 'launched', 'truths', 'lost',
+  'clues', 'completed', 'dishTuned', 'satelliteOnline', 'roverFixed',
+] as const
 
 export class QuestTracker {
   inventory: Partial<Record<ItemId, number>> = {}
@@ -107,6 +119,9 @@ export class QuestTracker {
   finalRaidWon = false
   launched = false
   truths: string[] = []
+  dishTuned = false
+  satelliteOnline = false
+  roverFixed = false
   lost: string[] = []
   clues: string[] = []
   completed: string[] = []
@@ -119,6 +134,32 @@ export class QuestTracker {
   private returnedToBase = new Set<string>()
   private started = false
   private pendingSounds: { sound: TrackerSound; at: number }[] = []
+
+  toSave(): Record<string, unknown> {
+    const self = this as unknown as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const key of SAVED_FIELDS) out[key] = self[key]
+    out.baseParts = [...this.baseParts]
+    out.returnedToBase = [...this.returnedToBase]
+    out.mainIndex = this.mainIndex
+    return out
+  }
+
+  loadSave(data: Record<string, unknown>): void {
+    const self = this as unknown as Record<string, unknown>
+    for (const key of SAVED_FIELDS) if (key in data) self[key] = data[key]
+    this.baseParts = new Set((data.baseParts as BasePart[]) ?? [])
+    this.returnedToBase = new Set((data.returnedToBase as string[]) ?? [])
+    if (this.completed.includes('act3.into-the-depths') && !this.completed.includes('act3.three-strangers')) this.completed.push('act3.three-strangers')
+    const firstOpen = this.mainQuests.findIndex((q) => !this.completed.includes(q.id))
+    this.mainIndex = firstOpen === -1 ? this.mainQuests.length : firstOpen
+    this.started = true
+    this.messages = []
+    this.popupFree = 0
+    this.pendingSounds = []
+    const quest = this.activeQuest
+    this.say('act', 'WELCOME BACK', quest ? `ACT ${roman(quest.act)} · ${quest.title.toUpperCase()}` : 'THE MOON REMEMBERS YOU', '#fac775', 0.3)
+  }
 
   get activeQuest(): Quest | null {
     return this.mainQuests[this.mainIndex] ?? null
@@ -416,6 +457,7 @@ export class QuestTracker {
     this.finalRaidWon = false
     this.launched = false
     this.messages = []
+    this.popupFree = 0
     this.pendingSounds = []
     this.say('act', 'BEFORE THE CHOICE', 'THIS TIME, THINK OF THEM', '#c9a6ff', 0.3)
     const quest = this.activeQuest
@@ -432,6 +474,15 @@ export class QuestTracker {
     this.toast(`${name} SUITS UP`, '#ff9f5a')
     this.sounds.push('build')
     this.check()
+  }
+
+  starveCivilians(names: string[]): void {
+    if (names.length === 0) return
+    this.lost.push(...names)
+    this.recruited = this.recruited.filter((n) => !names.includes(n))
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} AND ${names[names.length - 1]}`
+    this.say('transmission', 'THE SETTLEMENT', `${list} STARVED. THE FOOD BIN WAS EMPTY FOR THREE DAYS. NOBODY SAYS ANYTHING AT THE GRAVE.`, '#ff8a7a', 0.3)
+    this.sounds.push('clue')
   }
 
   loseCivilians(names: string[]): void {
@@ -461,7 +512,7 @@ export class QuestTracker {
   }
 
   aiChatter(text: string): void {
-    this.messages.push({ kind: 'transmission', text: 'MOONLINK', detail: text, color: '#5dcaa5', born: this.time, glitch: true })
+    this.say('transmission', 'MOONLINK', text, '#5dcaa5', 0, true)
   }
 
   enterCave(): void {
@@ -615,6 +666,7 @@ export class QuestTracker {
       this.devCompleteActive(onBuild)
     }
     this.messages = []
+    this.popupFree = 0
     this.pendingSounds = []
     const quest = this.activeQuest
     if (quest) {
@@ -929,8 +981,17 @@ export class QuestTracker {
     this.say('toast', text, '', color)
   }
 
-  private say(kind: MessageKind, text: string, detail: string, color: string, delay = 0): void {
-    this.messages.push({ kind, text, detail, color, born: this.time + delay })
+  private popupFree = 0
+
+  private say(kind: MessageKind, text: string, detail: string, color: string, delay = 0, glitch?: boolean): void {
+    let born = this.time + delay
+    if (kind === 'toast' || kind === 'transmission') {
+      if (kind === 'toast' && this.messages.some((m) => m.kind === 'toast' && m.born > this.time && m.text === text)) return
+      born = Math.max(born, this.popupFree)
+      if (kind === 'toast' && born - this.time > MAX_TOAST_WAIT) return
+      this.popupFree = born + (kind === 'toast' ? TOAST_LIFE : TRANSMISSION_LIFE)
+    }
+    this.messages.push({ kind, text, detail, color, born, ...(glitch ? { glitch } : {}) })
   }
 }
 

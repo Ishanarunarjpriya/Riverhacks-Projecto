@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { askAssistant, type AssistAnswer, type AssistBlock } from '../game/assistant'
 import { SCREEN_H, SCREEN_W } from '../game/constants'
 import type { ScreenRect } from '../game/tablet'
+import { speak } from '../game/voice'
 
 interface Props {
   rect: ScreenRect
@@ -130,7 +131,12 @@ export default function Assistant({ rect, onBack }: Props) {
     setQuery('')
     inputRef.current?.focus()
     askAssistant(q)
-      .then((data) => setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status: 'ready', data } : entry))))
+      .then((data) => {
+        setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, status: 'ready', data } : entry)))
+        const first = data.blocks.find((b) => b.type === 'paragraph' || b.type === 'heading')
+        const spoken = first && 'text' in first ? first.text : data.answer
+        if (spoken) speak(spoken.slice(0, 300), 'moonlink')
+      })
       .catch((error: unknown) =>
         setEntries((prev) =>
           prev.map((entry) =>

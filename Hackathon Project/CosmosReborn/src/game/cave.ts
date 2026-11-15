@@ -21,14 +21,6 @@ export function createCaveWorld(seed = 23): World {
     structures.some((s) => dist(x, z, s.x, s.z) < s.radius + margin) || dist(x, z, 0, 0) < 12
 
   const craters: Crater[] = []
-  for (let i = 0; i < 120; i++) {
-    const x = rng() * WORLD_SIZE
-    const z = rng() * WORLD_SIZE
-    const r = 2 + rng() * 6
-    if (tooClose(x, z, r + 6) || craters.some((c) => dist(x, z, c.x, c.z) < c.r + r + 4)) continue
-    const isPit = r >= 4
-    craters.push({ x, z, r, isPit, depth: isPit ? Math.min(3.5, 1.2 + r * 0.3) : r * 0.3 })
-  }
 
   const boulders: Boulder[] = []
   const addSpire = (x: number, z: number, tall: boolean) => {
@@ -103,8 +95,8 @@ export function drawCaveCeiling(ctx: Ctx, cam: Camera, time: number): void {
   }
 }
 
-export function drawDarkness(ctx: Ctx, px: number, py: number): void {
-  const g = ctx.createRadialGradient(px, py, 18, px, py, 150)
+export function drawDarkness(ctx: Ctx, px: number, py: number, glow = false): void {
+  const g = ctx.createRadialGradient(px, py, glow ? 60 : 18, px, py, glow ? 260 : 150)
   g.addColorStop(0, 'rgba(3,2,10,0)')
   g.addColorStop(0.5, 'rgba(3,2,10,0.55)')
   g.addColorStop(1, 'rgba(3,2,10,0.92)')
