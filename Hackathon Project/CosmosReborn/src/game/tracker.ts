@@ -1,7 +1,7 @@
-import { BASE_CENTER, BASE_RADIUS, PART_ITEMS, RECIPES, UPGRADE_PARTS, costEntries, type BasePart } from './base'
+import { BASE_CENTER, BASE_RADIUS, PART_ITEMS, PART_YIELD, RECIPES, UPGRADE_PARTS, costEntries, type BasePart } from './base'
 import { ITEMS, type ItemId } from './items'
 import { wrap } from './math'
-import { ACT_TITLES, QUESTS, type Objective, type Quest } from './quests'
+import { ACT_TITLES, QUESTS, SHIP_SPOT, type Objective, type Quest } from './quests'
 import { ANOMALIES } from './anomalies'
 import { REGIONS, type Region } from './regions'
 import { STRUCTURES } from './structures'
@@ -15,6 +15,7 @@ export interface Message {
   detail: string
   color: string
   born: number
+  glitch?: boolean
 }
 
 export interface ObjectiveProgress {
@@ -89,6 +90,9 @@ export class QuestTracker {
   suitSearched = false
   waveSurvived = false
   cavernFound = false
+  shipEntered = false
+  searched: string[] = []
+  blocksPlaced = 0
   clues: string[] = []
   completed: string[] = []
   messages: Message[] = []
@@ -193,7 +197,7 @@ export class QuestTracker {
     let allPreviousDone = true
     return quest.objectives.map((o) => {
       const [current, target] = this.measure(quest, o)
-      const done = current >= target && (o.kind !== 'return-to-base' || allPreviousDone)
+      const done = current >= target && ((o.kind !== 'return-to-base' && o.kind !== 'return-to-ship') || allPreviousDone)
       allPreviousDone = allPreviousDone && done
       return { label: o.label, current: Math.min(current, target), target, done }
     })
@@ -240,7 +244,12 @@ export class QuestTracker {
   nextPart(): BasePart | null {
     const quest = this.activeQuest
     if (!quest) return null
-    for (const o of quest.objectives) if (o.kind === 'build' && !this.baseParts.has(o.part)) return o.part
+    const progress = this.progress(quest)
+    for (let i = 0; i < quest.objectives.length; i++) {
+      const o = quest.objectives[i]
+      if (o.kind === 'build' && !this.baseParts.has(o.part)) return o.part
+      if (o.kind !== 'build' && !progress[i].done) return null
+    }
     return null
   }
 
@@ -253,11 +262,42 @@ export class QuestTracker {
     for (const [item, n] of costEntries(RECIPES[part])) this.inventory[item] = this.count(item) - n
     this.baseParts.add(part)
     const item = PART_ITEMS[part]
-    if (item) this.add(item, 1)
+    if (item) this.add(item, PART_YIELD[part] ?? 1)
     this.toast(`BUILT ${RECIPES[part].name}`, '#e6e6ee')
     this.sounds.push('build')
     this.check()
     return true
+  }
+
+  enterShip(): void {
+    if (this.shipEntered) return
+    this.shipEntered = true
+    this.say('transmission', 'INSIDE THE KESTREL', 'EMERGENCY LIGHTS. EVERY SEAT IS STRAPPED SHUT. NOBODY ELSE IS HERE.', '#ff8a7a', 0.8)
+    this.check()
+  }
+
+  searchWreck(id: string, text: string, reward: Partial<Record<ItemId, number>>): void {
+    if (this.searched.includes(id)) {
+      this.toast('ALREADY SEARCHED. NOTHING LEFT.', '#9aa2cf')
+      return
+    }
+    this.searched.push(id)
+    this.toast(text, '#d9dcef')
+    for (const [item, n] of Object.entries(reward) as [ItemId, number][]) this.collect(item, n)
+    this.check()
+  }
+
+  placeBlock(): void {
+    this.blocksPlaced++
+    this.check()
+  }
+
+  refund(item: ItemId): void {
+    this.add(item, 1)
+  }
+
+  aiChatter(text: string): void {
+    this.messages.push({ kind: 'transmission', text: 'MOONLINK', detail: text, color: '#5dcaa5', born: this.time, glitch: true })
   }
 
   enterCave(): void {
@@ -334,6 +374,14 @@ export class QuestTracker {
       const atBase = Math.hypot(wrap(playerX - BASE_CENTER.x), wrap(playerZ - BASE_CENTER.z)) < BASE_RADIUS
       if (index >= 0 && onSurface && atBase && this.progress(quest).slice(0, index).every((p) => p.done)) {
         this.returnedToBase.add(quest.id)
+        this.check()
+      }
+      const shipIndex = quest.objectives.findIndex((o) => o.kind === 'return-to-ship')
+      const atShip = Math.hypot(wrap(playerX - SHIP_SPOT.x), wrap(playerZ - SHIP_SPOT.z)) < SHIP_SPOT.radius
+      if (shipIndex >= 0 && onSurface && atShip && this.progress(quest).slice(0, shipIndex).every((p) => p.done)) {
+        this.returnedToBase.add(quest.id)
+        this.inventory['rocket-part'] = 0
+        this.say('transmission', 'MOONLINK', 'PARTS LOGGED. THE HULL IS TOO DAMAGED TO FLY. GO INSIDE. FIND METAL.', '#5dcaa5', 0.6)
         this.check()
       }
     }
@@ -452,7 +500,7 @@ export class QuestTracker {
         if (!this.baseParts.has(o.part)) {
           this.baseParts.add(o.part)
           const item = PART_ITEMS[o.part]
-          if (item) this.add(item, 1)
+          if (item) this.add(item, PART_YIELD[o.part] ?? 1)
           onBuild(o.part)
         }
         break
@@ -469,7 +517,7 @@ export class QuestTracker {
         this.returnedToBase.add(quest.id)
         break
       case 'clue':
-        fill(this.clues, ['suit-log', 'hab-log', 'signal'], o.count)
+        fill(this.clues, ['suit-log', 'ship-log', 'hab-log'], o.count)
         break
       case 'region':
         fill(this.regions, REGIONS.filter((r) => !r.home).map((r) => r.id), o.count)
@@ -508,6 +556,18 @@ export class QuestTracker {
         break
       case 'cavern':
         this.cavernFound = true
+        break
+      case 'return-to-ship':
+        this.returnedToBase.add(quest.id)
+        break
+      case 'ship':
+        this.shipEntered = true
+        break
+      case 'blocks':
+        this.blocksPlaced = Math.max(this.blocksPlaced, o.count)
+        break
+      case 'search':
+        fill(this.searched, ['LOCKER A', 'LOCKER B', 'LOCKER C'], o.count)
         break
     }
   }
@@ -559,6 +619,14 @@ export class QuestTracker {
         return [this.waveSurvived ? 1 : 0, 1]
       case 'cavern':
         return [this.cavernFound ? 1 : 0, 1]
+      case 'return-to-ship':
+        return [this.returnedToBase.has(quest.id) ? 1 : 0, 1]
+      case 'ship':
+        return [this.shipEntered ? 1 : 0, 1]
+      case 'search':
+        return [this.searched.length, o.count]
+      case 'blocks':
+        return [this.blocksPlaced, o.count]
     }
   }
 

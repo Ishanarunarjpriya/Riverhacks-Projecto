@@ -83,6 +83,43 @@ const ICON_DRAWERS: Partial<Record<ItemId, (g: Ctx) => void>> = {
     rect(g, '#d9dcef', 3, 4, 3, 1)
     rect(g, '#4b5488', 7, 8, 2, 1)
   },
+  'rocket-part': (g) => {
+    rect(g, '#9aa0b8', 1, 7, 10, 3)
+    rect(g, '#d4a43c', 2, 4, 7, 3)
+    rect(g, '#f2c85e', 2, 4, 7, 1)
+    rect(g, '#e6e6ee', 9, 2, 2, 8)
+  },
+  'metal-rod': (g) => {
+    for (let i = 0; i < 9; i++) rect(g, i % 3 ? '#c9cbe0' : '#e6e6ee', 1 + i, 9 - i, 2, 2)
+    rect(g, '#7d8aa8', 1, 10, 2, 1)
+  },
+  'moonrock-slab': (g) => {
+    rect(g, '#5b6496', 1, 5, 10, 5)
+    rect(g, '#9aa2c8', 1, 4, 10, 4)
+    rect(g, '#c9cbe0', 2, 4, 8, 1)
+    rect(g, '#7f88b4', 4, 6, 2, 1)
+  },
+  'crescent-shard': (g) => {
+    rect(g, '#2f8f86', 3, 8, 6, 2)
+    rect(g, '#5fe0c8', 2, 3, 2, 6)
+    rect(g, '#9fe1cb', 3, 2, 2, 2)
+    rect(g, '#5fe0c8', 8, 4, 2, 5)
+    rect(g, '#ffffff', 3, 2, 1, 1)
+  },
+  'ice-miner': (g) => {
+    rect(g, '#3f4878', 1, 9, 10, 2)
+    rect(g, '#5dcaa5', 2, 4, 8, 5)
+    rect(g, '#9fe1cb', 2, 4, 8, 1)
+    rect(g, '#c9cbe0', 5, 1, 2, 3)
+    rect(g, '#16182c', 4, 6, 4, 1)
+  },
+  anvil: (g) => {
+    rect(g, '#3f4878', 3, 9, 6, 2)
+    rect(g, '#4b5488', 5, 6, 2, 3)
+    rect(g, '#7c85b4', 1, 4, 8, 2)
+    rect(g, '#9aa2cf', 9, 4, 2, 1)
+    rect(g, '#c9cbe0', 1, 4, 8, 1)
+  },
   'metal-scrap': (g) => {
     rect(g, '#7d8aa8', 1, 6, 9, 3)
     rect(g, '#b9c3dc', 3, 3, 7, 3)

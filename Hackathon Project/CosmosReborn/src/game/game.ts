@@ -1,7 +1,8 @@
 import { ANOMALIES, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
 import { setAssistantContext } from './assistant'
 import { GameAudio, type SoundName } from './audio'
-import { BASE_CENTER, BASE_HALF, BASE_RADIUS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
+import { BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
+import { BLOCK, BLOCK_FOR_ITEM, BLOCK_INFO, BLOCK_REACH, MAX_STACK, cellCenter, cellOf, columnModel, ghostModel, type BlockColumn } from './blocks'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
 import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
 import {
@@ -28,6 +29,7 @@ import { drawCrater } from './crater'
 import { GARDEN_FIND_RANGE, GARDEN_FOOD, GARDEN_REGROW, drawPlant, growCrop, makeGarden, type Garden, type Plant } from './garden'
 import { SCAN_RANGE, createCreatures, drawCreature, speciesNote, updateCreatures, type Creature } from './creatures'
 import { Cutscene } from './cutscene'
+import { SHIP_SPAWN, SHIP_WORKBENCH, WRECKAGE, clampToShip, createShipWorld, drawShipCeiling, drawShipLight, SHIP_GROUND } from './ship'
 import { Hotbar, HOTBAR_SLOTS, type HotbarItem } from './hotbar'
 import { drawHud, type Prompt } from './hud'
 import { Input } from './input'
@@ -54,7 +56,7 @@ import {
 } from './survivors'
 import { TextLayer } from './text'
 import { QuestTracker, type TrackerSnapshot } from './tracker'
-import { craterAt, createWorld, groundHeightAt, type Boulder, type Crater } from './world'
+import { boulderAt, craterAt, createWorld, groundHeightAt, type Boulder, type Crater, type World } from './world'
 
 type Decal =
   | { kind: 'crater'; crater: Crater; pos: CamPos; depth: number }
@@ -62,6 +64,7 @@ type Decal =
   | { kind: 'shadow'; pos: CamPos; radius: number; depth: number }
   | { kind: 'pad'; depth: number }
   | { kind: 'garden'; pos: CamPos; radius: number; depth: number }
+  | { kind: 'plot'; pos: CamPos; radius: number; depth: number }
 
 type Upright =
   | { kind: 'boulder'; boulder: Boulder; p: ScreenPoint }
@@ -74,6 +77,16 @@ type Upright =
   | { kind: 'enemy'; enemy: Enemy; p: ScreenPoint }
   | { kind: 'wreck'; wreck: Wreck; p: ScreenPoint }
   | { kind: 'plant'; plant: Plant; p: ScreenPoint }
+  | { kind: 'blocks'; col: BlockColumn; x: number; z: number; p: ScreenPoint }
+  | { kind: 'ghost'; target: BlockTarget; p: ScreenPoint }
+
+interface BlockTarget {
+  gx: number
+  gz: number
+  level: number
+  ok: boolean
+  reason: string
+}
 
 interface Interaction extends Prompt {
   run?: () => void
@@ -94,7 +107,7 @@ export interface DevLocation {
   id: string
   label: string
   group: string
-  scene: 'surface' | 'cave'
+  scene: 'surface' | 'cave' | 'ship'
   x: number
   z: number
   face: number
@@ -138,6 +151,7 @@ export interface GameStateForAI extends TrackerSnapshot {
 }
 
 const INSPECT_RANGE = 5
+const SHIP_LANDING = { x: 0, z: 47 } as const
 const MINE_RANGE = 2.2
 const SUIT_CLUES = [
   "THE NAME TAG IS SCRATCHED OUT. UNDERNEATH, IN YOUR OWN HANDWRITING: 'DON'T LET THEM TAKE YOU BACK.'",
@@ -152,7 +166,11 @@ export class Game {
   private text: TextLayer
   private surface = createWorld()
   private caveWorld = createCaveWorld()
-  private scene: 'surface' | 'cave' = 'surface'
+  private scene: 'surface' | 'cave' | 'ship' = 'surface'
+  private shipWorld = createShipWorld()
+  private earthPlayed = false
+  private chatterTimer = 40
+  private buildSpot: { x: number; z: number; radius: number; ok: boolean } | null = null
   private enemies: Enemy[] = []
   private projectiles: Projectile[] = []
   private wrecks: Wreck[] = []
@@ -239,6 +257,7 @@ export class Game {
     canvas.addEventListener('pointermove', this.handlePointerMove)
     canvas.addEventListener('pointerdown', this.handlePointerDown)
     canvas.addEventListener('pointerup', this.handlePointerUp)
+    canvas.addEventListener('contextmenu', this.preventMenu)
 
     this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
     if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI() } })
@@ -260,6 +279,7 @@ export class Game {
     this.canvas.removeEventListener('pointermove', this.handlePointerMove)
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
     this.canvas.removeEventListener('pointerup', this.handlePointerUp)
+    this.canvas.removeEventListener('contextmenu', this.preventMenu)
   }
 
   private toGame(e: PointerEvent): [number, number] {
@@ -272,6 +292,120 @@ export class Game {
     this.inventory.pointer(x, y)
   }
 
+  private preventMenu = (e: Event) => e.preventDefault()
+
+  private blockTarget(): BlockTarget | null {
+    const held = this.heldItem()
+    const type = held ? BLOCK_FOR_ITEM[held] : undefined
+    if (!type || this.scene === 'ship') return null
+    const P = this.player
+    const [pgx, pgz] = cellOf(P.x, P.z)
+    let reach = BLOCK_REACH
+    let [gx, gz] = cellOf(P.x + Math.sin(P.heading) * reach, P.z + Math.cos(P.heading) * reach)
+    if (gx === pgx && gz === pgz) {
+      reach += BLOCK
+      ;[gx, gz] = cellOf(P.x + Math.sin(P.heading) * reach, P.z + Math.cos(P.heading) * reach)
+    }
+    const level = this.world.blocks.height(gx, gz) / BLOCK
+    const [cx, cz] = cellCenter(gx, gz)
+    const pad = BLOCK / 2 + 0.45
+    const underPlayer = Math.abs(wrap(P.x - cx)) < pad && Math.abs(wrap(P.z - cz)) < pad && P.y < (level + 1) * BLOCK
+    let reason = ''
+    if (level >= MAX_STACK) reason = 'TOO HIGH'
+    else if (underPlayer) reason = 'YOU ARE IN THE WAY'
+    else if (isSolidAtPad(this.world, cx, cz)) reason = 'SOMETHING IS IN THE WAY'
+    else if (level === 0 && craterAt(this.world, cx, cz)) reason = 'NOT INSIDE A CRATER'
+    else if (this.tracker.count(held!) <= 0) reason = `NO ${ITEMS[held!].name} LEFT`
+    return { gx, gz, level, ok: reason === '', reason }
+  }
+
+  private placeBlock(): void {
+    const target = this.blockTarget()
+    const held = this.heldItem()
+    if (!target || !held) return
+    if (!target.ok) {
+      this.sound('deny')
+      return
+    }
+    const type = BLOCK_FOR_ITEM[held]!
+    if (!this.tracker.consume(held)) return
+    this.world.blocks.place(target.gx, target.gz, type)
+    const [cx, cz] = cellCenter(target.gx, target.gz)
+    this.spawnBurst(cx, cz, target.level * BLOCK + BLOCK, 6, BLOCK_INFO[type].top, 2)
+    this.sound('build')
+    this.tracker.placeBlock()
+  }
+
+  private removeBlock(): void {
+    if (this.scene === 'ship') return
+    const P = this.player
+    let found: [number, number] | null = null
+    for (const reach of [BLOCK_REACH, BLOCK_REACH + BLOCK, 1.2]) {
+      const [gx, gz] = cellOf(P.x + Math.sin(P.heading) * reach, P.z + Math.cos(P.heading) * reach)
+      if (this.world.blocks.height(gx, gz) > 0) {
+        found = [gx, gz]
+        break
+      }
+    }
+    if (!found) return
+    const type = this.world.blocks.remove(found[0], found[1])
+    if (!type) return
+    const [cx, cz] = cellCenter(found[0], found[1])
+    this.spawnBurst(cx, cz, this.world.blocks.height(found[0], found[1]) + 1, 8, BLOCK_INFO[type].side, 3)
+    this.tracker.refund(BLOCK_INFO[type].item)
+    this.sound('break')
+  }
+
+  private freeBuildInteraction(): Interaction | null {
+    this.buildSpot = null
+    if (!this.onSurface) return null
+    const part = this.tracker.nextPart()
+    if (!part || !FREE_PARTS.includes(part)) return null
+    const structure = PART_STRUCTURES[part]
+    if (!structure) return null
+    const P = this.player
+    const ahead = structure.radius + 2.5
+    const x = P.x + Math.sin(P.heading) * ahead
+    const z = P.z + Math.cos(P.heading) * ahead
+    const r = structure.radius
+    const w = this.world
+    const blocked =
+      w.structures.some((s) => Math.hypot(wrap(x - s.x), wrap(z - s.z)) < s.radius + r + 0.5) ||
+      boulderAtPad(w, x, z, r) ||
+      !!craterAt(w, x, z) ||
+      w.blocks.heightAt(x, z, r) > 0 ||
+      Math.hypot(wrap(x - BASE_CENTER.x), wrap(z - BASE_CENTER.z)) < 2
+    this.buildSpot = { x, z, radius: r, ok: !blocked }
+    if (blocked) return { title: `BUILD ${RECIPES[part].name}`, detail: 'NO ROOM HERE. FACE AN OPEN SPOT', ok: false }
+    const craft = this.craftInteraction(part)
+    const run = craft.run
+    return {
+      ...craft,
+      title: craft.ok ? `[E] BUILD ${RECIPES[part].name} HERE` : `BUILD ${RECIPES[part].name} HERE`,
+      run: run
+        ? () => {
+            structure.x = x
+            structure.z = z
+            structure.yaw = P.heading + Math.PI
+            run()
+          }
+        : undefined,
+    }
+  }
+
+  private blockInteraction(): Interaction | null {
+    const target = this.blockTarget()
+    const held = this.heldItem()
+    if (!target || !held) return null
+    const type = BLOCK_FOR_ITEM[held]!
+    return {
+      title: target.ok ? `[CLICK] PLACE ${BLOCK_INFO[type].name}` : BLOCK_INFO[type].name,
+      detail: target.ok ? `[X] / RIGHT-CLICK TAKES ONE BACK · ${this.tracker.count(held)} LEFT` : target.reason,
+      ok: target.ok,
+      run: target.ok ? () => this.placeBlock() : undefined,
+    }
+  }
+
   private handlePointerUp = (e: PointerEvent) => {
     const [x, y] = this.toGame(e)
     const move = this.inventory.pointerUp(x, y)
@@ -282,7 +416,7 @@ export class Game {
   }
 
   private get world() {
-    return this.scene === 'cave' ? this.caveWorld : this.surface
+    return this.scene === 'cave' ? this.caveWorld : this.scene === 'ship' ? this.shipWorld : this.surface
   }
 
   private get onSurface(): boolean {
@@ -290,6 +424,11 @@ export class Game {
   }
 
   private handlePointerDown = (e: PointerEvent) => {
+    if (e.button === 2) {
+      e.preventDefault()
+      if (this.playing && !this.tablet.visible && !this.inventory.visible) this.removeBlock()
+      return
+    }
     if (this.playing && !this.tablet.visible && !this.inventory.visible) this.mouseFire = true
     const [x, y] = this.toGame(e)
     if (this.inventory.open && this.inventory.pointerDown(x, y, this.slotItems())) {
@@ -301,6 +440,10 @@ export class Game {
 
   private handleMenuKey(code: string): boolean {
     if (!this.playing) return false
+    if (code === 'KeyX' && !this.tablet.open && !this.inventory.open) {
+      this.removeBlock()
+      return true
+    }
     if (code === 'KeyF' && !this.tablet.open) {
       this.inventory.toggle()
       this.sound(this.inventory.open ? 'tabletOpen' : 'tabletClose')
@@ -338,6 +481,12 @@ export class Game {
     }
     const drifter = this.creatures.find((c) => !c.scanned) ?? this.creatures[0]
     if (drifter) locs.push({ id: 'drifter', label: 'Nearest unscanned drifter', group: 'Act II', scene: 'surface', x: drifter.x, z: drifter.z - 8, face: 0 })
+    locs.push({ id: 'ship-airlock', label: 'Inside the Kestrel', group: 'Act I', scene: 'ship', x: SHIP_SPAWN.x, z: SHIP_SPAWN.z, face: 0 })
+    locs.push({ id: 'ship-bench', label: 'Ship workbench', group: 'Act I', scene: 'ship', x: SHIP_WORKBENCH.x - 4, z: SHIP_WORKBENCH.z - 3, face: 0.6 })
+    for (const item of ['rocket-part', 'ice-miner', 'anvil', 'crescent-shard'] as ItemId[]) {
+      const p = this.surface.pickups.find((pk) => pk.item === item && !pk.collected)
+      if (p) locs.push({ id: `pickup-${item}`, label: `Nearest ${ITEMS[item].name.toLowerCase()}`, group: 'Act I', scene: 'surface', x: p.x, z: p.z - 6, face: 0 })
+    }
     locs.push({ id: 'cave-spawn', label: 'Cave entrance', group: 'Cave', scene: 'cave', x: CAVE_SPAWN.x, z: CAVE_SPAWN.z, face: Math.PI })
     locs.push({ id: 'cave-ladder', label: 'Cave ladder', group: 'Cave', scene: 'cave', x: LADDER.x - 6, z: LADDER.z, face: Math.PI / 2 })
     locs.push({ id: 'cave-cavern', label: 'Hidden cavern', group: 'Cave', scene: 'cave', x: CAVERN.x - 12, z: CAVERN.z, face: Math.PI / 2 })
@@ -355,6 +504,7 @@ export class Game {
     this.cutscene.skip()
     this.scene = loc.scene
     if (loc.scene === 'cave') this.tracker.currentRegion = 'UNDERGROUND'
+    if (loc.scene === 'ship') this.tracker.currentRegion = 'THE KESTREL'
     this.placePlayer(loc.x, loc.z, loc.face)
     this.projectiles = []
     this.fade = 0.6
@@ -371,7 +521,7 @@ export class Game {
   }
 
   devGiveResources(): void {
-    this.tracker.devGive({ 'moon-rock': 30, 'metal-scrap': 30, 'power-cell': 3, 'anomaly-shard': 10, 'bio-sample': 5, 'rare-ore': 15 })
+    this.tracker.devGive({ 'moon-rock': 30, 'metal-scrap': 30, 'crescent-shard': 20, 'power-cell': 3, 'anomaly-shard': 10, 'bio-sample': 5, 'rare-ore': 15 })
   }
 
   devGiveGear(): void {
@@ -521,7 +671,7 @@ export class Game {
     }
     const inv = Object.entries(s.inventory).map(([id, n]) => `${ITEMS[id as ItemId].name.toLowerCase()} x${n}`)
     parts.push(`Inventory: ${inv.length ? inv.join(', ') : 'empty'}`)
-    parts.push(`Location: ${s.currentRegion}${this.onSurface ? '' : ' (in the caves)'}${s.player.atBase ? ', at the base site' : ''}${s.player.inCrater ? ', inside a crater' : ''}`)
+    parts.push(`Location: ${s.currentRegion}${this.scene === 'cave' ? ' (in the caves)' : this.scene === 'ship' ? ' (inside the wrecked Kestrel)' : ''}${s.player.atBase ? ', at the base site' : ''}${s.player.inCrater ? ', inside a crater' : ''}`)
     parts.push(`Health ${Math.round(this.hp)}/${PLAYER_MAX_HP}${this.enemies.length ? `, ${this.enemies.length} suits nearby` : ''}`)
     for (const r of s.nearestNeededResources) parts.push(`Nearest ${ITEMS[r.item].name.toLowerCase()}: ${r.distance}m ${r.direction}`)
     if (s.signalSource) parts.push(`Strange signal: ${s.signalSource.distance}m ${s.signalSource.direction}`)
@@ -638,6 +788,13 @@ export class Game {
     this.audio.update(dt)
     if (!this.cutscene.done) {
       this.cutscene.update(dt, this.audio)
+      if (this.cutscene.done) this.input.clear()
+      return
+    }
+    if (!this.earthPlayed && this.tracker.completed.includes('act1.strange-survival')) {
+      this.earthPlayed = true
+      this.cutscene = new Cutscene('earth')
+      this.input.clear()
       return
     }
     if (!this.playStarted) {
@@ -657,6 +814,7 @@ export class Game {
     if (this.mouseFire && !menu && !dead) controls.fire = true
     this.mouseFire = false
     this.player.update(dt, controls, this.world)
+    if (this.scene === 'ship') [this.player.x, this.player.z] = clampToShip(this.player.x, this.player.z)
     this.camera.follow(this.player.x, this.player.z, this.player.heading, dt)
 
     for (const e of this.player.events) {
@@ -671,7 +829,7 @@ export class Game {
     if (this.onSurface) {
       this.discoverStructures()
       this.updateActTwo(dt)
-    } else if (this.distanceTo(CAVERN.x, CAVERN.z) < CAVERN_RANGE) {
+    } else if (this.scene === 'cave' && this.distanceTo(CAVERN.x, CAVERN.z) < CAVERN_RANGE) {
       this.tracker.findCavern()
     }
     this.updateProduction(dt)
@@ -683,13 +841,50 @@ export class Game {
     for (const b of this.world.boulders) b.shake = Math.max(0, b.shake - dt)
     this.updateParticles(dt)
     this.updateGardens(dt)
+    this.updateChatter(dt)
 
+    this.buildSpot = null
     this.interaction = menu ? null : this.findInteraction()
     if (this.interactQueued) {
       this.interactQueued = false
       if (this.interaction?.run) this.interaction.run()
       else if (this.interaction) this.sound('deny')
     }
+  }
+
+  private updateChatter(dt: number): void {
+    const tracker = this.tracker
+    if (tracker.act !== 1 || !tracker.activeQuest) return
+    const busy = tracker.messages.some((m) => (m.kind === 'transmission' || m.kind === 'quest') && tracker.time - m.born < 8 && tracker.time >= m.born - 6)
+    this.chatterTimer -= dt
+    if (this.chatterTimer > 0 || busy) return
+    this.chatterTimer = 55 + Math.random() * 40
+    tracker.aiChatter(this.chatterLine())
+    this.sound('clue')
+  }
+
+  private chatterLine(): string {
+    const s = this.stateForAI()
+    const lines: string[] = []
+    for (const r of s.nearestNeededResources) {
+      lines.push(`${ITEMS[r.item].name} DETECTED. ${r.distance}M ${r.direction.toUpperCase()}. GO.`)
+    }
+    const part = this.tracker.nextPart()
+    if (part) {
+      const recipe = RECIPES[part]
+      lines.push(recipe.station === 'workbench' ? `THE WORKBENCH IN THE SHIP CAN MAKE ${recipe.name}. IF IT STILL WORKS.` : `YOU CAN ${recipe.verb ?? 'BUILD'} ${recipe.name} AT THE BASE SITE. I THINK.`)
+    }
+    const quest = this.tracker.activeQuest
+    if (quest?.id === 'act1.inside-the-ship' && this.scene !== 'ship') lines.push('THE KESTREL IS STILL OPEN. STAND BY THE HULL AND PRESS E.')
+    if (quest?.id === 'act1.strange-survival') lines.push('DOCUMENTS. GREEN BLINKING. ONE INSIDE THE SHIP. ONE AT THE HABITAT DOME.')
+    const eerie = [
+      'DO YOU HEAR THAT? NEITHER DO I. THAT IS THE PROBLEM.',
+      'YOUR HEART RATE IS NORMAL. IT SHOULD NOT BE.',
+      'I HAVE BEEN TALKING TO MYSELF FOR TEN YEARS. HELLO.',
+      'THE EARTH LOOKS CLOSE TODAY. IT IS NOT.',
+    ]
+    if (lines.length === 0 || Math.random() < 0.25) lines.push(eerie[Math.floor(Math.random() * eerie.length)])
+    return lines[Math.floor(Math.random() * lines.length)]
   }
 
   private cropsIn(garden: Garden): number {
@@ -823,7 +1018,11 @@ export class Game {
     }
 
     if (fire && this.fireCooldown <= 0) {
-      if (this.heldItem() === 'blaster') {
+      const heldNow = this.heldItem()
+      if (heldNow && BLOCK_FOR_ITEM[heldNow] && this.scene !== 'ship') {
+        this.fireCooldown = 0.18
+        this.placeBlock()
+      } else if (heldNow === 'blaster') {
         this.fireCooldown = BLASTER_COOLDOWN
         const target = this.onSurface ? pickTarget(this.enemies, player.x, player.z, player.heading) : null
         const tx = target ? target.x : player.x + Math.sin(player.heading) * 30
@@ -920,6 +1119,26 @@ export class Game {
     P.grounded = true
     this.camera.heading = heading
     this.camera.follow(x, z, heading, 1)
+  }
+
+  private enterShip(): void {
+    this.scene = 'ship'
+    this.placePlayer(SHIP_SPAWN.x, SHIP_SPAWN.z, 0)
+    this.projectiles = []
+    this.particles = []
+    this.fade = 1
+    this.sound('rumble')
+    this.tracker.currentRegion = 'THE KESTREL'
+    this.tracker.enterShip()
+  }
+
+  private exitShip(): void {
+    this.scene = 'surface'
+    this.placePlayer(SHIP_LANDING.x, SHIP_LANDING.z, Math.PI)
+    this.particles = []
+    this.fade = 1
+    this.sound('rumble')
+    this.tracker.currentRegion = 'CRASH SITE'
   }
 
   private enterCave(): void {
@@ -1089,6 +1308,41 @@ export class Game {
     }
 
     for (const s of world.structures) {
+      if (s.kind === 'bulkhead' || (s.kind === 'debris' && s.name !== 'WRECKAGE')) continue
+      if (s.kind === 'airlock') {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] LEAVE THE SHIP', detail: 'BACK OUT ONTO THE MOON', ok: true, run: () => this.exitShip() }))
+        continue
+      }
+      if (s.kind === 'locker' || s.kind === 'debris') {
+        const wreck = WRECKAGE[s.name]
+        if (!wreck) continue
+        const done = tracker.searched.includes(s.name)
+        consider(s.x, s.z, s.radius, 2.5, () => ({
+          title: done ? s.name : `[E] SEARCH ${s.name}`,
+          detail: done ? 'ALREADY SEARCHED' : 'SOMETHING USEFUL MIGHT BE INSIDE',
+          ok: !done,
+          run: done
+            ? undefined
+            : () => {
+                this.sound('inspect')
+                tracker.searchWreck(wreck.id, wreck.text, wreck.reward)
+              },
+        }))
+        continue
+      }
+      if (s.kind === 'workbench') {
+        const part = tracker.nextPart()
+        consider(s.x, s.z, s.radius, 3, () =>
+          part && RECIPES[part].station === 'workbench'
+            ? this.craftInteraction(part)
+            : { title: 'WORKBENCH', detail: 'NOTHING TO CRAFT HERE RIGHT NOW', ok: false },
+        )
+        continue
+      }
+      if (s.kind === 'lander' && (tracker.completed.includes('act1.pieces') || tracker.shipEntered)) {
+        consider(s.x, s.z, s.radius, INSPECT_RANGE + 2, () => ({ title: '[E] ENTER THE KESTREL', detail: 'THE AIRLOCK HANGS OPEN', ok: true, run: () => this.enterShip() }))
+        continue
+      }
       if (s.kind === 'ladder') {
         consider(s.x, s.z, s.radius, INSPECT_RANGE, () => ({ title: '[E] CLIMB UP', detail: 'BACK TO THE SURFACE', ok: true, run: () => this.exitCave() }))
         continue
@@ -1118,7 +1372,7 @@ export class Game {
       }))
     }
 
-    if (candidates.length === 0) return this.eatInteraction()
+    if (candidates.length === 0) return this.blockInteraction() ?? this.freeBuildInteraction() ?? this.eatInteraction()
     candidates.sort((a, b) => a.gap - b.gap)
     return candidates[0].make()
   }
@@ -1126,18 +1380,23 @@ export class Game {
   private buildInteraction(): Interaction | null {
     if (!this.atBase()) return null
     const part = this.tracker.nextPart() ?? this.tracker.nextUpgrade()
-    if (!part) return null
-    const recipe = RECIPES[part]
+    if (!part || RECIPES[part].station || FREE_PARTS.includes(part)) return null
     const spot = PART_STRUCTURES[part]
     if (spot && this.distanceTo(spot.x, spot.z) < spot.radius + 1.5) {
-      return { title: `BUILD ${recipe.name}`, detail: 'STEP OFF THE BUILD SPOT', ok: false }
+      return { title: `${RECIPES[part].verb ?? 'BUILD'} ${RECIPES[part].name}`, detail: 'STEP OFF THE BUILD SPOT', ok: false }
     }
+    return this.craftInteraction(part)
+  }
+
+  private craftInteraction(part: BasePart): Interaction {
+    const recipe = RECIPES[part]
+    const verb = recipe.verb ?? 'BUILD'
     const cost = costEntries(recipe)
       .map(([item, n]) => `${ITEMS[item].short} ${Math.min(this.tracker.count(item), n)}/${n}`)
       .join('   ')
     const ok = this.tracker.canAfford(part)
     return {
-      title: ok ? `[E] BUILD ${recipe.name}` : `BUILD ${recipe.name}`,
+      title: ok ? `[E] ${verb} ${recipe.name}` : `${verb} ${recipe.name}`,
       detail: ok ? cost : `NEED ${cost}`,
       ok,
       run: ok
@@ -1145,7 +1404,7 @@ export class Game {
             if (!this.tracker.build(part)) return
             const structure = PART_STRUCTURES[part]
             if (structure) {
-              this.world.structures.push(structure)
+              this.surface.structures.push(structure)
               this.spawnBurst(structure.x, structure.z, 0, 14, '#e2e5f2', 4)
             }
           }
@@ -1256,7 +1515,9 @@ export class Game {
     const surface = this.onSurface
     this.glows = []
 
+    const inShip = this.scene === 'ship'
     if (surface) this.sky.draw(ctx, cam, player.x, player.z, this.time)
+    else if (inShip) drawShipCeiling(ctx, cam, this.time)
     else drawCaveCeiling(ctx, cam, this.time)
     this.drawSurface()
 
@@ -1281,6 +1542,14 @@ export class Game {
       }
     }
     for (const s of world.structures) addShadow(s.x, s.z, s.radius * 1.25)
+    if (this.buildSpot) {
+      const pos = cam.toCamera(this.buildSpot.x, this.buildSpot.z)
+      decals.push({ kind: 'plot', pos, radius: this.buildSpot.radius, depth: pos.rz })
+    }
+    for (const col of world.blocks.columns()) {
+      const [cx, cz] = cellCenter(col.gx, col.gz)
+      addShadow(cx, cz, BLOCK * 0.75)
+    }
     for (const g of world.gardens) {
       const pos = cam.toCamera(g.x, g.z)
       if (pos.rz + g.radius > 1 && Math.hypot(pos.rx, pos.rz) - g.radius < HORIZON_D) decals.push({ kind: 'garden', pos, radius: g.radius, depth: pos.rz })
@@ -1299,6 +1568,13 @@ export class Game {
       if (d.kind === 'crater') drawCrater(ctx, cam, d.crater, d.pos)
       else if (d.kind === 'pebble') rect(ctx, d.p.scale > 4 ? '#6f78a8' : '#848dbb', d.p.sx, d.p.sy, d.p.scale > 5 ? 2 : 1, 1)
       else if (d.kind === 'pad') this.drawBasePad()
+      else if (d.kind === 'plot') {
+        const ok = this.buildSpot?.ok ?? true
+        const pts = cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius, 0, 18))
+        ctx.globalAlpha = 0.35 + 0.15 * Math.sin(this.time * 6)
+        fillPolygon(ctx, ok ? '#fac775' : '#ff8a7a', pts)
+        ctx.globalAlpha = 1
+      }
       else if (d.kind === 'garden') {
         fillPolygon(ctx, '#3a5a5c', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius, 0, 18)))
         fillPolygon(ctx, '#3f6e5e', cam.projectPolygon(ring(d.pos.rx, d.pos.rz, d.radius * 0.7, 0, 16)))
@@ -1316,8 +1592,10 @@ export class Game {
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -20 && p.sx < SCREEN_W + 20) uprights.push({ kind: 'boulder', boulder, p })
     }
+    const playerRz = cam.toCamera(player.x, player.z).rz
     for (const structure of world.structures) {
       const pos = cam.toCamera(structure.x, structure.z)
+      if (structure.kind === 'bulkhead' && pos.rz < playerRz + 1) continue
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -80 && p.sx < SCREEN_W + 80) uprights.push({ kind: 'structure', structure, p })
     }
@@ -1326,6 +1604,19 @@ export class Game {
       const pos = cam.toCamera(pickup.x, pickup.z)
       const p = cam.projectPoint(pos.rx, pos.rz)
       if (p && p.sx > -10 && p.sx < SCREEN_W + 10) uprights.push({ kind: 'pickup', pickup, p })
+    }
+    for (const col of world.blocks.columns()) {
+      const [cx, cz] = cellCenter(col.gx, col.gz)
+      const pos = cam.toCamera(cx, cz)
+      const p = cam.projectPoint(pos.rx, pos.rz)
+      if (p && p.sx > -40 && p.sx < SCREEN_W + 40) uprights.push({ kind: 'blocks', col, x: cx, z: cz, p })
+    }
+    const ghost = !this.tablet.visible && !this.inventory.visible && this.deadTimer <= 0 ? this.blockTarget() : null
+    if (ghost) {
+      const [cx, cz] = cellCenter(ghost.gx, ghost.gz)
+      const pos = cam.toCamera(cx, cz)
+      const p = cam.projectPoint(pos.rx, pos.rz)
+      if (p) uprights.push({ kind: 'ghost', target: ghost, p: { ...p, depth: p.depth - 0.01 } })
     }
     for (const g of world.gardens) {
       if (Math.hypot(wrap(g.x - player.x), wrap(g.z - player.z)) > HORIZON_D + g.radius) continue
@@ -1384,6 +1675,16 @@ export class Game {
       else if (u.kind === 'enemy') drawEnemy(ctx, u.enemy, u.p.sx, u.p.sy, this.time)
       else if (u.kind === 'wreck') drawWreck(ctx, u.wreck, u.p.sx, u.p.sy, u.p.scale, this.time)
       else if (u.kind === 'plant') drawPlant(ctx, u.plant, u.p.sx, u.p.sy, u.p.scale, this.time)
+      else if (u.kind === 'blocks') {
+        this.model.begin({ x: u.x, z: u.z, yaw: 0 })
+        this.model.draw(ctx, columnModel(u.col))
+      } else if (u.kind === 'ghost') {
+        const [cx, cz] = cellCenter(u.target.gx, u.target.gz)
+        ctx.globalAlpha = 0.35 + 0.1 * Math.sin(this.time * 6)
+        this.model.begin({ x: cx, z: cz, yaw: 0 })
+        this.model.draw(ctx, ghostModel(Math.min(u.target.level, MAX_STACK - 1), u.target.ok))
+        ctx.globalAlpha = 1
+      }
       else this.drawPlayer(u.p, u.pos)
       if (u.kind === 'pickup' && u.pickup.item === 'rare-ore') this.glows.push({ x: u.p.sx, y: u.p.sy - u.p.scale, color: '#ffd28a' })
       if (u.kind === 'structure' && (u.structure.kind === 'cavern' || u.structure.kind === 'ladder')) {
@@ -1392,7 +1693,8 @@ export class Game {
     }
     this.drawParticles()
     this.drawProjectiles()
-    if (!surface) {
+    if (inShip) drawShipLight(ctx, this.time)
+    else if (!surface) {
       const pc = cam.toCamera(player.x, player.z)
       const pp = cam.projectPoint(pc.rx, pc.rz)
       drawDarkness(ctx, pp?.sx ?? SCREEN_W / 2, (pp?.sy ?? 140) - 8)
@@ -1468,7 +1770,7 @@ export class Game {
 
   private drawSurface(): void {
     const { ctx } = this
-    const pal = this.onSurface ? { rim: '#e9e5cc', rim2: '#c3c9e3', band: '#7f88b4', base: '#9aa2c8' } : CAVE_GROUND
+    const pal = this.onSurface ? { rim: '#e9e5cc', rim2: '#c3c9e3', band: '#7f88b4', base: '#9aa2c8' } : this.scene === 'ship' ? SHIP_GROUND : CAVE_GROUND
     for (let sx = 0; sx < SCREEN_W; sx++) {
       const yf = horizonY(sx + 0.5)
       const y0 = Math.floor(yf)
@@ -1556,4 +1858,12 @@ export class Game {
     player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.heldItem() === 'blaster', pickaxe: this.tracker.toolTier(), held: this.heldItem() })
     if (sunk) ctx.restore()
   }
+}
+
+function isSolidAtPad(world: World, x: number, z: number): boolean {
+  return world.structures.some((s) => s.radius > 0 && Math.hypot(wrap(x - s.x), wrap(z - s.z)) < s.radius + BLOCK * 0.6) || !!boulderAt(world, x, z, BLOCK * 0.6)
+}
+
+function boulderAtPad(world: World, x: number, z: number, pad: number): boolean {
+  return !!boulderAt(world, x, z, pad)
 }

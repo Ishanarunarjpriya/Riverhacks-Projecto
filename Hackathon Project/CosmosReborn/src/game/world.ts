@@ -1,5 +1,6 @@
 import { ANOMALIES } from './anomalies'
 import { BASE_CENTER, BASE_RADIUS } from './base'
+import { BlockGrid } from './blocks'
 import { WORLD_SIZE } from './constants'
 import { GARDEN_FOOD, createGardens, growCrop, type Garden } from './garden'
 import { createRng, wrap } from './math'
@@ -38,6 +39,7 @@ export interface World {
   structures: Structure[]
   pickups: Pickup[]
   gardens: Garden[]
+  blocks: BlockGrid
 }
 
 export const CRATER_FLOOR_RATIO = 0.7
@@ -100,7 +102,7 @@ export function createWorld(seed = 11): World {
 
   for (const g of gardens) for (let i = 0; i < GARDEN_FOOD; i++) pickups.push(growCrop(g, rng))
 
-  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens }
+  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens, blocks: new BlockGrid() }
 }
 
 export function craterAt(world: World, x: number, z: number): Crater | null {
@@ -136,7 +138,11 @@ export function groundHeightAt(world: World, x: number, z: number): number {
   const crater = craterAt(world, x, z)
   const base = crater ? craterHeight(crater, x, z) : 0
   const boulder = boulderAt(world, x, z, 0.5)
-  return boulder ? Math.max(base, boulder.height) : base
+  return Math.max(boulder ? Math.max(base, boulder.height) : base, world.blocks.heightAt(x, z, 0.4))
+}
+
+export function walkBlocked(world: World, x: number, z: number): boolean {
+  return isSolidAt(world, x, z) || world.blocks.heightAt(x, z, 0.4) > 0
 }
 
 export function isSolidAt(world: World, x: number, z: number): boolean {

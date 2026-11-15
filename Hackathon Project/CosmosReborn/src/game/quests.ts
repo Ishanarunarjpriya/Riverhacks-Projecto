@@ -1,5 +1,5 @@
 import type { BasePart } from './base'
-import { SUPPLY_ITEMS, type ItemId } from './items'
+import type { ItemId } from './items'
 
 export type Objective =
   | { kind: 'collect'; label: string; item: ItemId; count: number }
@@ -22,6 +22,10 @@ export type Objective =
   | { kind: 'search-suit'; label: string }
   | { kind: 'wave'; label: string }
   | { kind: 'cavern'; label: string }
+  | { kind: 'return-to-ship'; label: string }
+  | { kind: 'ship'; label: string }
+  | { kind: 'search'; label: string; count: number }
+  | { kind: 'blocks'; label: string; count: number }
 
 export interface Quest {
   id: string
@@ -51,56 +55,78 @@ export const ACT_TITLES: Record<number, string> = {
 
 export const QUESTS: readonly Quest[] = [
   {
-    id: 'act1.crash-landing',
+    id: 'act1.pieces',
     act: 1,
-    title: 'Crash Landing',
-    summary: 'Explore the crash site and salvage 3 useful supplies.',
-    hint: 'Supply crates with blinking orange lights were thrown out around the lander in the crash. Walk up to one and press E.',
-    objectives: [{ kind: 'collect-any', label: 'Salvage supplies', items: SUPPLY_ITEMS, count: 3 }],
+    title: 'Pieces of the Kestrel',
+    summary: 'Find 3 rocket parts thrown from the ship and bring them back to it.',
+    hint: 'Rocket parts glint orange on the ground around the crash site. Pick them up with E, then walk back to the crashed lander.',
+    transmission: 'REBUILD... THE ROCKET. THAT IS ALL YOU REMEMBER.',
+    objectives: [
+      { kind: 'collect', label: 'Rocket parts', item: 'rocket-part', count: 3 },
+      { kind: 'return-to-ship', label: 'Bring them to the Kestrel' },
+    ],
+  },
+  {
+    id: 'act1.inside-the-ship',
+    act: 1,
+    title: 'Inside the Ship',
+    summary: 'Go inside the wrecked Kestrel and search it for metal.',
+    hint: 'Stand by the crashed lander and press E to climb in. Search the lockers and wreckage with E, then craft metal rods at the workbench at the far end.',
+    transmission: "MOONLINK: THE AIRLOCK IS OPEN. IT WAS OPENED FROM OUTSIDE.",
+    objectives: [
+      { kind: 'ship', label: 'Enter the Kestrel' },
+      { kind: 'search', label: 'Search the wreckage', count: 3 },
+      { kind: 'build', label: 'Craft metal rods', part: 'rods' },
+    ],
+  },
+  {
+    id: 'act1.first-craft',
+    act: 1,
+    title: 'Start the First Craft',
+    summary: 'Bring the ice miner and the anvil to base and forge your first pickaxe.',
+    hint: 'The ice miner and the anvil were thrown out in the crash; the A.I. pings their direction. Carry each to the base site and press E to set it up. The miner presses 4 moon rocks into a slab; the anvil forges rods and the slab into a pickaxe.',
+    objectives: [
+      { kind: 'collect', label: 'Find the ice miner', item: 'ice-miner', count: 1 },
+      { kind: 'build', label: 'Set up the ice miner at base', part: 'minerset' },
+      { kind: 'build', label: 'Press a MoonRock slab', part: 'slab' },
+      { kind: 'collect', label: 'Find the anvil', item: 'anvil', count: 1 },
+      { kind: 'build', label: 'Set up the anvil at base', part: 'anvilset' },
+      { kind: 'build', label: 'Forge your first pickaxe', part: 'tools' },
+    ],
   },
   {
     id: 'act1.first-materials',
     act: 1,
     title: 'First Materials',
-    summary: 'Collect 10 moon rocks and 6 metal scraps.',
-    hint: 'Loose moon rocks glint on the ground everywhere. Metal scrap from the crash lies around the lander.',
+    summary: 'Collect 10 moon rocks, 6 metal scraps, and 4 crescent shards.',
+    hint: 'Moon rocks lie everywhere and come out of boulders you mine. Metal scrap is scattered around the lander. Crescent shards are curved green crystals in the dust.',
     objectives: [
       { kind: 'collect', label: 'Moon rocks', item: 'moon-rock', count: 10 },
       { kind: 'collect', label: 'Metal scrap', item: 'metal-scrap', count: 6 },
+      { kind: 'collect', label: 'Crescent shards', item: 'crescent-shard', count: 4 },
     ],
   },
   {
     id: 'act1.place-to-stay',
     act: 1,
     title: 'A Place to Stay',
-    summary: 'Craft a pickaxe and build shelter, storage, and power.',
-    hint: 'Stand on the marked base site beside the lander and press E to build each part. Power needs the salvaged power cell.',
+    summary: 'Build shelter, storage, and power anywhere you like, and shape your base with blocks.',
+    hint: 'Press E where you want each part; it is built right in front of you, wherever you are. Power needs the power cell from the ship lockers. Hold moon rocks or crescent shards in your hotbar and click to place blocks; X or right-click takes one back.',
     objectives: [
-      { kind: 'build', label: 'Craft a pickaxe', part: 'tools' },
+      { kind: 'blocks', label: 'Place building blocks', count: 6 },
       { kind: 'build', label: 'Build shelter', part: 'shelter' },
       { kind: 'build', label: 'Build storage', part: 'storage' },
       { kind: 'build', label: 'Build power', part: 'power' },
     ],
   },
   {
-    id: 'act1.breaking-ground',
+    id: 'act1.strange-survival',
     act: 1,
-    title: 'Breaking Ground',
-    summary: 'Use your new pickaxe to break apart 3 boulders.',
-    hint: 'Walk up to any boulder and press E to swing. Three swings crack it open and it drops moon rocks.',
-    objectives: [{ kind: 'mine', label: 'Boulders mined', count: 3 }],
-  },
-  {
-    id: 'act1.first-exploration',
-    act: 1,
-    title: 'First Exploration',
-    summary: 'Scout nearby Moon terrain and return to base.',
-    hint: 'Head out to a structure you have not seen yet, inspect it with E, then come back to your base.',
-    objectives: [
-      { kind: 'discover', label: 'Map a new location', count: 1 },
-      { kind: 'inspect', label: 'Inspect what you find', count: 1 },
-      { kind: 'return-to-base', label: 'Return to base' },
-    ],
+    title: 'Strange Survival',
+    summary: 'Find 3 documents about why you can breathe without a suit.',
+    hint: 'Data logs blink green. One is near the lander, one is inside the Kestrel, and one is at the Habitat dome to the north-east.',
+    transmission: 'MOONLINK: YOUR O2 READS 0%. I HAVE STOPPED ASKING WHY.',
+    objectives: [{ kind: 'clue', label: 'Documents found', count: 3 }],
   },
   {
     id: 'act2.beyond-the-base',
@@ -233,15 +259,6 @@ export const QUESTS: readonly Quest[] = [
     objectives: [{ kind: 'build', label: 'Forge the moon pickaxe', part: 'moonpick' }],
   },
   {
-    id: 'act1.strange-survival',
-    act: 1,
-    optional: true,
-    title: 'Strange Survival',
-    summary: 'Find early clues about why you can survive without a spacesuit.',
-    hint: 'Data logs blink green. One is by the lander; others are near structures someone left behind.',
-    objectives: [{ kind: 'clue', label: 'Data logs', count: 3 }],
-  },
-  {
     id: 'act2.moon-survey',
     act: 2,
     optional: true,
@@ -260,6 +277,8 @@ export const QUESTS: readonly Quest[] = [
     objectives: [{ kind: 'cavern', label: 'Find the hidden cavern' }],
   },
 ]
+
+export const SHIP_SPOT = { x: 0, z: 60, radius: 14 } as const
 
 export const CLUES: readonly Clue[] = [
   { id: 'suit-log', x: 7, z: 52, text: 'SUIT LOG: HELMET SEAL BROKEN ON IMPACT. O2 0%. VITALS... NORMAL?' },

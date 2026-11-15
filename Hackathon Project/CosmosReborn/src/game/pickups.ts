@@ -27,14 +27,14 @@ export function createPickups(
   const free = (x: number, z: number) =>
     !blocked(x, z, 2) && !craters.some((c) => Math.hypot(wrap(x - c.x), wrap(z - c.z)) < c.r * 1.3)
 
-  const place = (item: ItemId, x: number, z: number, clue?: Clue) => {
+  const place = (item: ItemId, x: number, z: number, clue?: Clue, force = false) => {
     let px = x
     let pz = z
     for (let tries = 0; tries < 12 && !free(px, pz); tries++) {
       px = x + (rng() - 0.5) * 10
       pz = z + (rng() - 0.5) * 10
     }
-    if (free(px, pz) || clue) pickups.push({ item, x: px, z: pz, phase: rng() * 10, collected: false, clue })
+    if (free(px, pz) || clue || force) pickups.push({ item, x: px, z: pz, phase: rng() * 10, collected: false, clue })
   }
 
   const scatter = (item: ItemId, count: number, cx: number, cz: number, minR: number, maxR: number) => {
@@ -48,6 +48,14 @@ export function createPickups(
   const anywhere = (item: ItemId, count: number) => {
     for (let i = 0; i < count; i++) place(item, rng() * WORLD_SIZE, rng() * WORLD_SIZE)
   }
+
+  place('rocket-part', -34, 88, undefined, true)
+  place('rocket-part', 42, 96, undefined, true)
+  place('rocket-part', -46, 24, undefined, true)
+  place('ice-miner', -70, 130, undefined, true)
+  place('anvil', 80, -30, undefined, true)
+  scatter('crescent-shard', 10, 0, 0, 25, 120)
+  anywhere('crescent-shard', 24)
 
   place('power-cell', -12, 20)
   place('ration-pack', -5, 42)
@@ -113,6 +121,32 @@ export function drawPickup(ctx: Ctx, pickup: Pickup, sx: number, sy: number, s: 
       box('#2e3352', -0.8, 0.5, 1.6, 0.5)
       box(blink ? '#9fe1cb' : '#5dcaa5', -0.6, 0.45, 1.2, 0.25)
       if (blink) rect(ctx, '#5dcaa5', sx, sy - 0.5 * s - 3, 1, 2)
+      break
+    case 'rocket-part':
+      box('#9aa0b8', -1.2, 0.9, 2.4, 0.9)
+      box('#d4a43c', -0.9, 1.5, 1.6, 0.7)
+      box('#e6e6ee', 0.5, 1.8, 0.5, 1.8)
+      if (blink) rect(ctx, '#fac775', sx - 1, sy - 1.8 * s - 3, 2, 2)
+      break
+    case 'crescent-shard':
+      box('#2f8f86', -0.6, 0.6, 1.2, 0.6)
+      box('#9fe1cb', -0.8, 1.4, 0.5, 0.9)
+      box('#5fe0c8', 0.2, 1.2, 0.5, 0.8)
+      if (glint) rect(ctx, '#ffffff', sx, sy - 1.4 * s - 1, 1, 1)
+      break
+    case 'ice-miner':
+      box('#3f4878', -1.6, 0.4, 3.2, 0.4)
+      box('#5dcaa5', -1.3, 2.2, 2.6, 1.8)
+      box('#9aa0b8', -0.2, 3.4, 0.4, 1.2)
+      box('#c9cbe0', -0.7, 3.6, 1.4, 0.3)
+      if (blink) rect(ctx, '#9fe1cb', sx - 1, sy - 3.6 * s - 3, 2, 2)
+      break
+    case 'anvil':
+      box('#3f4878', -0.8, 0.5, 1.6, 0.5)
+      box('#4b5488', -0.4, 1.1, 0.8, 0.6)
+      box('#7c85b4', -1.2, 1.6, 2.4, 0.5)
+      box('#9aa2cf', 1.2, 1.5, 0.8, 0.3)
+      if (blink) rect(ctx, '#fac775', sx - 1, sy - 1.6 * s - 3, 2, 2)
       break
     case 'rare-ore': {
       const glow = Math.sin(time * 3 + pickup.phase) > 0

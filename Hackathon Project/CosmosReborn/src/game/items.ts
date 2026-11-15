@@ -18,6 +18,12 @@ export type ItemId =
   | 'glow-cap'
   | 'iron-ore'
   | 'titanium-ore'
+  | 'rocket-part'
+  | 'metal-rod'
+  | 'moonrock-slab'
+  | 'crescent-shard'
+  | 'ice-miner'
+  | 'anvil'
 
 export interface ItemInfo {
   name: string
@@ -45,6 +51,12 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
   'star-melon': { name: 'STAR MELON', short: 'MELON', color: '#ffb35a', description: 'Sweet and cold. Hold it and press E to eat. Heals 30.' },
   'glow-cap': { name: 'GLOW CAP', short: 'GLOW CAP', color: '#5fe0c8', description: 'A shining mushroom. Hold it and press E to eat. Heals 60.' },
   'iron-ore': { name: 'IRON ORE', short: 'IRON', color: '#c08a64', description: 'Rusty lunar iron. Sometimes drops from boulders.' },
+  'rocket-part': { name: 'ROCKET PART', short: 'PART', color: '#fac775', description: 'A piece of the Kestrel, thrown clear in the crash.' },
+  'metal-rod': { name: 'METAL ROD', short: 'ROD', color: '#c9cbe0', description: 'Straightened hull strut. Good for handles.' },
+  'moonrock-slab': { name: 'MOONROCK SLAB', short: 'SLAB', color: '#9aa2c8', description: 'Moon stone pressed flat by the ice miner. Hard enough to be a pick head.' },
+  'crescent-shard': { name: 'CRESCENT SHARD', short: 'CRESCENT', color: '#9fe1cb', description: 'A curved crystal that grows in the dust. Used for building.' },
+  'ice-miner': { name: 'ICE MINER', short: 'MINER', color: '#5dcaa5', description: 'A mineral press from the Kestrel. Set it up at the base site.' },
+  'anvil': { name: 'ANVIL', short: 'ANVIL', color: '#7c85b4', description: 'Heavy. Very heavy. Set it up at the base site to forge tools.' },
   'titanium-ore': { name: 'TITANIUM ORE', short: 'TITANIUM', color: '#a9c3d6', description: 'Rare, light and strong. Sometimes drops from boulders.' },
 }
 

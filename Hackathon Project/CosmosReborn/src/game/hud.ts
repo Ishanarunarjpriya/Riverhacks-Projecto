@@ -250,9 +250,30 @@ function drawTransmission(ctx: Ctx, text: TextLayer, tracker: QuestTracker): voi
   lines.forEach((line, i) => {
     const n = clamp(left, 0, line.length)
     left -= line.length + 1
-    if (n > 0) text.text(line.slice(0, n), x + 6, y + 11 + i * 7, '#efe3ff', style)
+    if (n <= 0) return
+    const glitchy = m.glitch || m.text === 'MOONLINK' || m.detail.startsWith('MOONLINK')
+    if (!glitchy) {
+      text.text(line.slice(0, n), x + 6, y + 11 + i * 7, '#efe3ff', style)
+      return
+    }
+    const tick = Math.floor(age * 14)
+    const shown = glitchLine(line.slice(0, n), tick + i * 7)
+    const jitter = (tick + i) % 23 === 0 ? 1 : 0
+    if ((tick + i) % 17 === 0) text.text(shown, x + 7, y + 11 + i * 7, 'rgba(255,90,120,0.6)', style)
+    text.text(shown, x + 6 + jitter, y + 11 + i * 7, '#c8fff0', style)
   })
   text.alpha = saved
+}
+
+const GLITCH_CHARS = '#%&@$/\\|<>?!01'
+
+function glitchLine(line: string, seed: number): string {
+  let out = ''
+  for (let i = 0; i < line.length; i++) {
+    const h = Math.abs(Math.sin((i + 1) * 12.9898 + seed * 78.233) * 43758.5453) % 1
+    out += line[i] !== ' ' && h < 0.06 ? GLITCH_CHARS[Math.floor(h * 1000) % GLITCH_CHARS.length] : line[i]
+  }
+  return out
 }
 
 function drawActCard(ctx: Ctx, text: TextLayer, m: Message, age: number): void {

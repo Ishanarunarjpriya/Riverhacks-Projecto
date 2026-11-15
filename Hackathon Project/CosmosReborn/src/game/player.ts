@@ -136,6 +136,7 @@ export class Player {
     const slope = rise / run
     const boulder = boulderAt(world, nx, nz, 0.5)
     if (boulder && boulder.height > this.y + STEP_HEIGHT) return false
+    if (world.blocks.heightAt(nx, nz, 0.4) > this.y + STEP_HEIGHT) return false
     const crater = craterAt(world, nx, nz)
     if (crater?.isPit && slope > MAX_PIT_SLOPE) return false
     const slow = 1 / (1 + slope * CLIMB_SLOWDOWN)

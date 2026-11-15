@@ -1,6 +1,6 @@
 import { wrap } from './math'
 import { rect, type Ctx } from './pixel'
-import { boulderAt, isSolidAt, type World } from './world'
+import { boulderAt, isSolidAt, walkBlocked, type World } from './world'
 
 export interface Enemy {
   id: number
@@ -121,7 +121,7 @@ export function updateEnemies(enemies: Enemy[], dt: number, ctx: EnemyContext, o
         [-mz * e.strafe, mx * e.strafe],
         [mz * e.strafe, -mx * e.strafe],
       ]
-      const free = options.find(([ox, oz]) => !isSolidAt(ctx.world, e.x + ox * step, e.z + oz * step))
+      const free = options.find(([ox, oz]) => !walkBlocked(ctx.world, e.x + ox * step, e.z + oz * step))
       if (free) {
         e.x += free[0] * step
         e.z += free[1] * step
@@ -151,7 +151,7 @@ export function updateProjectiles(projectiles: Projectile[], dt: number, enemies
     p.z += p.vz * dt
     p.life -= dt
     if (p.life <= 0) continue
-    if (!p.pierce && (isSolidAt(world, p.x, p.z) || (boulderAt(world, p.x, p.z)?.height ?? -1) > p.y)) {
+    if (!p.pierce && (isSolidAt(world, p.x, p.z) || (boulderAt(world, p.x, p.z)?.height ?? -1) > p.y || world.blocks.heightAt(p.x, p.z) > p.y)) {
       p.life = 0
       onHit(p, { enemy: null, player: false, wall: true })
       continue

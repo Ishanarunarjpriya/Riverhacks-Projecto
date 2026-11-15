@@ -20,6 +20,13 @@ export type StructureKind =
   | 'turret'
   | 'ladder'
   | 'cavern'
+  | 'miner'
+  | 'anvil'
+  | 'bulkhead'
+  | 'locker'
+  | 'workbench'
+  | 'airlock'
+  | 'debris'
 
 export interface Structure {
   kind: StructureKind
@@ -71,6 +78,8 @@ export const INSPECTIONS: Partial<Record<StructureKind, Inspection>> = {
     text: 'THE MARKINGS LOOK FAMILIAR. THE LAUNCH DATE PRINTED ON IT IS 40 YEARS IN THE FUTURE.',
     reward: { item: 'metal-scrap', count: 3 },
   },
+  miner: { text: 'THE ICE MINER HUMS. IT PRESSES MOON STONE INTO SLABS.' },
+  anvil: { text: 'COLD IRON. SOMEBODY ENGRAVED A NAME ON THE SIDE. IT IS YOURS.' },
   hatch: { text: 'A SEALED HATCH, HALF BURIED IN DUST. YOU KNOCK. SOMETHING BELOW KNOCKS BACK. THREE TIMES.' },
   cavern: {
     text: 'THE WALLS ARE COVERED IN HANDPRINTS. HUNDREDS OF THEM. EVERY ONE IS EXACTLY THE SIZE OF YOURS.',
@@ -244,6 +253,60 @@ function buildModel(kind: StructureKind, time: number): Part[] {
         glowBox(-0.3, 0.3, 3.6, 3.8, -0.3, 0.3, blink ? '#ff8a7a' : '#7a2e2e'),
       ]
     }
+    case 'miner':
+      return [
+        box(-1.8, 1.8, 0, 0.4, -1.4, 1.4, '#3f4878', '#4b5488'),
+        box(-1.5, 1.5, 0.4, 2.6, -1.2, 1.2, '#5dcaa5', '#9fe1cb'),
+        box(-1.55, 1.55, 1.5, 1.8, -1.25, 1.25, '#2f6f5f'),
+        box(-0.3, 0.3, 2.6, 4.2, -0.3, 0.3, '#9aa0b8'),
+        box(-0.9, 0.9, 3.6, 4, -0.9, 0.9, '#c9cbe0', '#e6e6ee'),
+        box(-0.15, 0.15, -0.6, 0.4, 1.2, 1.5, '#9aa0b8'),
+        glowBox(0.6, 1.1, 2, 2.4, 1.2, 1.3, blink ? '#9fe1cb' : '#1d5c4a'),
+      ]
+    case 'anvil':
+      return [
+        box(-0.9, 0.9, 0, 0.5, -0.6, 0.6, '#3f4878', '#4b5488'),
+        box(-0.45, 0.45, 0.5, 1.2, -0.35, 0.35, '#4b5488'),
+        box(-1.3, 1.1, 1.2, 1.8, -0.55, 0.55, '#5b6496', '#9aa2cf'),
+        box(1.1, 1.9, 1.35, 1.75, -0.3, 0.3, '#5b6496', '#9aa2cf'),
+      ]
+    case 'bulkhead':
+      return [
+        box(-3.05, 3.05, 0, 8, -0.35, 0.35, '#3a4062', '#4b5488'),
+        box(-3.06, 3.06, 2.4, 2.8, -0.36, 0.36, '#e0884a'),
+        box(-2.6, -2.2, 0.2, 7.6, -0.4, 0.4, '#2a2f4c'),
+        glowBox(-0.4, 0.4, 6.6, 7, -0.42, 0.42, blink ? '#e24b4a' : '#4a1f2a'),
+      ]
+    case 'locker':
+      return [
+        box(-1, 1, 0, 3.6, -0.6, 0.6, '#5b6496', '#7c85b4'),
+        box(-0.05, 0.05, 0.2, 3.4, 0.6, 0.65, '#2a2f4c'),
+        box(0.3, 0.5, 1.6, 2, 0.6, 0.7, '#fac775'),
+        box(-0.5, -0.3, 1.6, 2, 0.6, 0.7, '#fac775'),
+      ]
+    case 'workbench':
+      return [
+        box(-2.2, 2.2, 1.5, 1.8, -1, 1, '#9aa0b8', '#c9cbe0'),
+        box(-2, -1.7, 0, 1.5, -0.8, -0.5, '#3f4878'),
+        box(1.7, 2, 0, 1.5, -0.8, -0.5, '#3f4878'),
+        box(-2, -1.7, 0, 1.5, 0.5, 0.8, '#3f4878'),
+        box(1.7, 2, 0, 1.5, 0.5, 0.8, '#3f4878'),
+        box(-1.2, 0.2, 1.8, 2.1, -0.3, 0.3, '#e0884a'),
+        glowBox(1, 1.6, 1.8, 2.4, -0.4, 0.2, blink ? '#5dcaa5' : '#1d5c4a'),
+      ]
+    case 'airlock':
+      return [
+        box(-2.6, 2.6, 0, 6, -0.4, 0.4, '#3a4062', '#4b5488'),
+        box(-1.6, 1.6, 0, 4.6, -0.45, 0.45, '#16182c'),
+        box(-1.6, 1.6, 4.4, 4.6, -0.5, 0.5, '#fac775'),
+        glowBox(-0.3, 0.3, 5, 5.4, -0.5, 0.5, '#5dcaa5'),
+      ]
+    case 'debris':
+      return [
+        box(-1.2, 0.9, 0, 1.3, -0.8, 1, '#4b5488', '#7c85b4'),
+        box(-0.4, 1.4, 1.3, 1.6, -0.6, 0.3, '#9aa0b8'),
+        box(0.8, 1.1, 0, 2.4, 0.4, 0.7, '#c8692f'),
+      ]
     case 'ladder':
       return [
         box(-2.4, 2.4, 0, 0.3, -2.4, 2.4, '#3f4878', '#4b5488'),

@@ -2,6 +2,10 @@ import type { ItemId } from './items'
 import type { Structure } from './structures'
 
 export type BasePart =
+  | 'rods'
+  | 'minerset'
+  | 'slab'
+  | 'anvilset'
   | 'tools'
   | 'moonpick'
   | 'shelter'
@@ -22,12 +26,18 @@ export const BASE_RADIUS = 15
 export interface Recipe {
   name: string
   cost: Partial<Record<ItemId, number>>
+  station?: 'workbench'
+  verb?: string
 }
 
 export const RECIPES: Record<BasePart, Recipe> = {
-  tools: { name: 'PICKAXE', cost: { 'moon-rock': 2, 'metal-scrap': 2 } },
+  rods: { name: 'METAL RODS', cost: { 'metal-scrap': 4 }, station: 'workbench', verb: 'CRAFT' },
+  minerset: { name: 'ICE MINER', cost: { 'ice-miner': 1 }, verb: 'SET UP' },
+  slab: { name: 'MOONROCK SLAB', cost: { 'moon-rock': 4 }, verb: 'PRESS' },
+  anvilset: { name: 'ANVIL', cost: { anvil: 1 }, verb: 'SET UP' },
+  tools: { name: 'PICKAXE', cost: { 'metal-rod': 2, 'moonrock-slab': 1 }, verb: 'FORGE' },
   moonpick: { name: 'MOON PICKAXE', cost: { 'moon-rock': 8, 'metal-scrap': 4, 'anomaly-shard': 2 } },
-  shelter: { name: 'SHELTER', cost: { 'moon-rock': 4, 'metal-scrap': 2 } },
+  shelter: { name: 'SHELTER', cost: { 'moon-rock': 4, 'crescent-shard': 2, 'metal-scrap': 1 } },
   storage: { name: 'STORAGE', cost: { 'moon-rock': 3, 'metal-scrap': 1 } },
   power: { name: 'POWER', cost: { 'moon-rock': 1, 'metal-scrap': 1, 'power-cell': 1 } },
   housing: { name: 'HOUSING', cost: { 'moon-rock': 6, 'metal-scrap': 3 } },
@@ -40,6 +50,8 @@ export const RECIPES: Record<BasePart, Recipe> = {
 }
 
 export const PART_ITEMS: Partial<Record<BasePart, ItemId>> = {
+  rods: 'metal-rod',
+  slab: 'moonrock-slab',
   tools: 'pickaxe',
   moonpick: 'moon-pickaxe',
   drill: 'power-drill',
@@ -51,7 +63,13 @@ export const PART_ITEMS: Partial<Record<BasePart, ItemId>> = {
 // quest asks for it. Used by the build prompt as a fallback.
 export const UPGRADE_PARTS: readonly BasePart[] = ['moonpick']
 
+export const FREE_PARTS: readonly BasePart[] = ['shelter', 'storage', 'power']
+
+export const PART_YIELD: Partial<Record<BasePart, number>> = { rods: 2 }
+
 export const PART_STRUCTURES: Partial<Record<BasePart, Structure>> = {
+  minerset: { kind: 'miner', name: 'ICE MINER', x: 30, z: 25, radius: 2.2, mapColor: '#5dcaa5', yaw: -0.4 },
+  anvilset: { kind: 'anvil', name: 'ANVIL', x: 15, z: 41, radius: 1.6, mapColor: '#9aa2cf', yaw: 0.2 },
   shelter: { kind: 'shelter', name: 'SHELTER', x: 22, z: 38, radius: 4.5, mapColor: '#ffffff' },
   storage: { kind: 'storage', name: 'STORAGE', x: 9, z: 37, radius: 2.5, mapColor: '#9aa2cf' },
   power: { kind: 'power', name: 'POWER', x: 24, z: 23, radius: 2.5, mapColor: '#5dcaa5' },

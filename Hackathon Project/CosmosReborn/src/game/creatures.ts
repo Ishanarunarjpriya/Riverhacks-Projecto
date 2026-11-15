@@ -1,6 +1,6 @@
 import { wrap } from './math'
 import { ellipse, rect, type Ctx } from './pixel'
-import { isSolidAt, type World } from './world'
+import { walkBlocked, type World } from './world'
 
 export interface Creature {
   id: number
@@ -67,7 +67,7 @@ export function updateCreatures(creatures: Creature[], dt: number, playerX: numb
     }
     const nx = c.x + Math.sin(c.heading) * speed * dt
     const nz = c.z + Math.cos(c.heading) * speed * dt
-    if (isSolidAt(world, nx, nz)) {
+    if (walkBlocked(world, nx, nz)) {
       c.heading += Math.PI / 2
       continue
     }

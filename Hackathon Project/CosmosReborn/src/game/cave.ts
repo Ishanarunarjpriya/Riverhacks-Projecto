@@ -1,3 +1,4 @@
+import { BlockGrid } from './blocks'
 import type { Camera } from './camera'
 import { FOCAL, SCREEN_CX, SCREEN_H, SCREEN_W, WORLD_SIZE } from './constants'
 import { createRng, wrap } from './math'
@@ -59,7 +60,7 @@ export function createCaveWorld(seed = 23): World {
   }
 
   const pebbles = Array.from({ length: 900 }, () => ({ x: rng() * WORLD_SIZE, z: rng() * WORLD_SIZE }))
-  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens: [] }
+  return { craters, pits: craters.filter((c) => c.isPit), pebbles, boulders, structures, pickups, gardens: [], blocks: new BlockGrid() }
 }
 
 export const CAVE_GROUND = { rim: '#5a4a6e', rim2: '#463a5c', band: '#2c2440', base: '#3a3150' }
