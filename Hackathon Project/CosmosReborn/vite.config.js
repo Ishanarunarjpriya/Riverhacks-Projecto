@@ -24,6 +24,7 @@ function geminiAssistant(env) {
     const { status, body } = await answerAssist({
       query: url.searchParams.get('q'),
       token: url.searchParams.get('token'),
+      context: url.searchParams.get('ctx'),
       key,
     })
     send(status, body)

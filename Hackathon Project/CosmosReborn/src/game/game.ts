@@ -1,4 +1,5 @@
 import { ANOMALIES, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
+import { setAssistantContext } from './assistant'
 import { GameAudio, type SoundName } from './audio'
 import { BASE_CENTER, BASE_HALF, BASE_RADIUS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
@@ -236,6 +237,7 @@ export class Game {
 
     this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
     if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI() } })
+    setAssistantContext(() => this.assistantContext())
   }
 
   start(): void {
@@ -248,6 +250,7 @@ export class Game {
     cancelAnimationFrame(this.raf)
     this.input.detach()
     this.audio.close()
+    setAssistantContext(null)
     window.removeEventListener('keydown', this.skipCutscene)
     this.canvas.removeEventListener('pointermove', this.handlePointerMove)
     this.canvas.removeEventListener('pointerdown', this.handlePointerDown)
@@ -452,6 +455,37 @@ export class Game {
   private devAddPart(part: BasePart): void {
     const structure = PART_STRUCTURES[part]
     if (structure && !this.surface.structures.includes(structure)) this.surface.structures.push(structure)
+  }
+
+  assistantContext(): string {
+    const s = this.stateForAI()
+    const parts: string[] = []
+    const q = s.activeQuest
+    if (q) {
+      const steps = q.objectives.map((o) => `${o.label} ${o.done ? 'DONE' : o.target > 1 ? `${o.current}/${o.target}` : 'not done'}`).join('; ')
+      parts.push(`Act ${q.act}, quest "${q.title}": ${q.summary} Progress: ${steps}. Hint: ${q.hint}`)
+    } else {
+      parts.push('All available quests are complete; more acts are coming.')
+    }
+    for (const o of s.optionalQuests) {
+      const p = o.objectives[0]
+      parts.push(`Side quest "${o.title}" ${p.current}/${p.target}`)
+    }
+    const inv = Object.entries(s.inventory).map(([id, n]) => `${ITEMS[id as ItemId].name.toLowerCase()} x${n}`)
+    parts.push(`Inventory: ${inv.length ? inv.join(', ') : 'empty'}`)
+    parts.push(`Location: ${s.currentRegion}${this.onSurface ? '' : ' (in the caves)'}${s.player.atBase ? ', at the base site' : ''}${s.player.inCrater ? ', inside a crater' : ''}`)
+    parts.push(`Health ${Math.round(this.hp)}/${PLAYER_MAX_HP}${this.enemies.length ? `, ${this.enemies.length} suits nearby` : ''}`)
+    for (const r of s.nearestNeededResources) parts.push(`Nearest ${ITEMS[r.item].name.toLowerCase()}: ${r.distance}m ${r.direction}`)
+    if (s.signalSource) parts.push(`Strange signal: ${s.signalSource.distance}m ${s.signalSource.direction}`)
+    const part = this.tracker.nextPart()
+    if (part && q) parts.push(`Next thing to build at the base site: ${RECIPES[part].name.toLowerCase()}`)
+    if (q?.objectives.some((o) => o.label.toLowerCase().includes('scan') && !o.done) && s.nearestUnscannedCreature) {
+      parts.push(`Nearest drifter: ${s.nearestUnscannedCreature.distance}m ${s.nearestUnscannedCreature.direction}`)
+    }
+    if (q?.objectives.some((o) => o.label.toLowerCase().includes('anomal') && !o.done) && s.nearestUninvestigatedAnomaly) {
+      parts.push(`Nearest anomaly: ${s.nearestUninvestigatedAnomaly.distance}m ${s.nearestUninvestigatedAnomaly.direction}`)
+    }
+    return parts.map((p) => p.replace(/\.+$/, '')).join('. ').slice(0, 1200)
   }
 
   stateForAI(): GameStateForAI {

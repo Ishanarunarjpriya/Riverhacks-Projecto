@@ -74,6 +74,7 @@ const server = createServer(async (req, res) => {
     const { status, body } = await answerAssist({
       query: url.searchParams.get('q'),
       token: url.searchParams.get('token'),
+      context: url.searchParams.get('ctx'),
       key: API_KEY,
     })
     return json(res, status, body)

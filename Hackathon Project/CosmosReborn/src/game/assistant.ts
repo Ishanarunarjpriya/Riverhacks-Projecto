@@ -27,6 +27,11 @@ export interface AssistAnswer {
  * token keeps the conversation going between questions.
  */
 let threadToken: string | null = null
+let contextProvider: (() => string) | null = null
+
+export function setAssistantContext(provider: (() => string) | null): void {
+  contextProvider = provider
+}
 
 export function forgetThread(): void {
   threadToken = null
@@ -35,6 +40,8 @@ export function forgetThread(): void {
 export async function askAssistant(query: string): Promise<AssistAnswer> {
   const params = new URLSearchParams({ q: query })
   if (threadToken) params.set('token', threadToken)
+  const context = contextProvider?.()
+  if (context) params.set('ctx', context.slice(0, 1200))
   const res = await fetch(`/api/assist?${params.toString()}`)
   let payload: unknown = null
   try {
