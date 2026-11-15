@@ -1,5 +1,6 @@
 import { WORLD_SIZE } from './constants'
-import { ITEMS, type ItemId } from './items'
+import { HAS_ITEM_PNG, ICONS } from './hotbar'
+import { ITEMS, SUPPLY_ITEMS, type ItemId } from './items'
 import { wrap } from './math'
 import { rect, type Ctx } from './pixel'
 import { CLUES, type Clue } from './quests'
@@ -68,6 +69,19 @@ export function drawPickup(ctx: Ctx, pickup: Pickup, sx: number, sy: number, s: 
     rect(ctx, c, sx + ux * s, sy - top * s, uw * s, uh * s)
   const blink = Math.floor(time * 3 + pickup.phase) % 2 === 0
   const glint = Math.sin(time * 1.7 + pickup.phase * 3) > 0.93
+
+  if (HAS_ITEM_PNG.has(pickup.item)) {
+    const icon = ICONS[pickup.item]
+    const size = Math.max(4, Math.round(2.2 * s))
+    const bob = Math.sin(time * 2 + pickup.phase) * 0.15 * s
+    const prev = ctx.imageSmoothingEnabled
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(icon, Math.round(sx - size / 2), Math.round(sy - size - 0.2 * s + bob), size, size)
+    ctx.imageSmoothingEnabled = prev
+    if (SUPPLY_ITEMS.includes(pickup.item) && blink) rect(ctx, '#fac775', sx - 1, sy - size - 0.2 * s - 3, 2, 2)
+    else if (glint) rect(ctx, '#ffffff', sx + size * 0.25, sy - size * 0.8, 1, 1)
+    return
+  }
 
   switch (pickup.item) {
     case 'power-cell':

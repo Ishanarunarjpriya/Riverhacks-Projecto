@@ -163,9 +163,38 @@ const ICON_DRAWERS: Record<ItemId, (g: Ctx) => void> = {
   },
 }
 
+const ITEM_PNGS: readonly ItemId[] = [
+  'anomaly-shard',
+  'rare-ore',
+  'bio-sample',
+  'armor-plating',
+  'blaster',
+  'repair-kit',
+  'power-cell',
+  'ration-pack',
+  'metal-scrap',
+  'pickaxe',
+]
+
 export const ICONS = Object.fromEntries(
   (Object.keys(ICON_DRAWERS) as ItemId[]).map((id) => [id, makeSprite(12, 12, ICON_DRAWERS[id])]),
 ) as Record<ItemId, HTMLCanvasElement>
+
+export const HAS_ITEM_PNG = new Set<ItemId>()
+
+for (const id of ITEM_PNGS) {
+  const img = new Image()
+  img.onload = () => {
+    ICONS[id] = makeSprite(img.width, img.height, (g) => g.drawImage(img, 0, 0))
+    HAS_ITEM_PNG.add(id)
+  }
+  img.src = `${import.meta.env.BASE_URL}ui/items/${id}.png`
+}
+
+export function drawItemIcon(text: TextLayer, item: ItemId, x: number, y: number, size: number): void {
+  const icon = ICONS[item]
+  text.image(icon, 0, 0, icon.width, icon.height, x, y, size, size)
+}
 
 export interface HotbarItem {
   item: ItemId
@@ -214,7 +243,7 @@ export class Hotbar {
       if (!entry) continue
       const cx = x0 + (24.5 + SLOT_PITCH * i) * DRAW_SCALE
       const cy = y0 + 23.5 * DRAW_SCALE
-      text.image(ICONS[entry.item], 0, 0, 12, 12, cx - 5, cy - 5, 10, 10)
+      drawItemIcon(text, entry.item, cx - 5.5, cy - 5.5, 11)
       if (entry.count > 1) {
         text.text(String(entry.count), cx + 6.5, cy + 2.2, '#ffffff', { size: 4.5, align: 'right', weight: 700 })
       }

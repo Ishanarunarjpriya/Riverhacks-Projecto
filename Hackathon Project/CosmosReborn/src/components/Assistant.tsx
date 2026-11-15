@@ -16,7 +16,9 @@ interface Entry {
   error?: string
 }
 
-const SUGGESTIONS = ['what is moon dust made of?', 'why can you survive without a suit?', 'how do you make oxygen on the moon?']
+const SUGGESTIONS = ['why is the dust so sharp?', 'why am i still breathing?', 'how do we make air out here?']
+
+const WAITING = ['THE CORE IS LISTENING…', 'SOMETHING IN THE DUST IS THINKING…', 'RELAYING THROUGH THE WRECK…']
 
 // Kept outside the component so the conversation survives closing the tablet.
 let sessionLog: Entry[] = []
@@ -153,7 +155,7 @@ export default function Assistant({ rect, onBack }: Props) {
       <div className="ai-shell">
         <div className="ai-status">
           <span className="ai-name">MOONLINK</span>
-          <span className={offline ? 'ai-link ai-link-down' : 'ai-link'}>{offline ? 'GEMINI: NO SIGNAL' : 'GEMINI: ONLINE'}</span>
+          <span className={offline ? 'ai-link ai-link-down' : 'ai-link'}>{offline ? 'SIGNAL: LOST' : 'SIGNAL: WEAK'}</span>
           <button className="ai-back" onMouseDown={(e) => e.preventDefault()} onClick={onBack} aria-label="Back to tablet home">
             ◀ HOME
           </button>
@@ -167,7 +169,9 @@ export default function Assistant({ rect, onBack }: Props) {
                 <br />
                 &gt; HELLO. YOU ARE AWAKE. THAT WAS NOT SUPPOSED TO HAPPEN.
                 <br />
-                &gt; ASK ME ANYTHING. THE OLD NETWORKS STILL ANSWER.
+                &gt; THE OLD NETWORKS STILL ANSWER. SOMETHING OUT THERE ANSWERS WITH THEM.
+                <br />
+                &gt; ASK. I WILL TELL YOU WHAT I AM ALLOWED TO.
               </p>
               <div className="ai-suggestions">
                 {SUGGESTIONS.map((s) => (
@@ -182,7 +186,7 @@ export default function Assistant({ rect, onBack }: Props) {
           {entries.map((entry, index) => (
             <div className="ai-entry" key={entry.id} ref={index === entries.length - 1 ? lastEntryRef : undefined}>
               <p className="ai-query">&gt; {entry.query.toUpperCase()}</p>
-              {entry.status === 'loading' && <p className="ai-line">TUNING INTO GEMINI…</p>}
+              {entry.status === 'loading' && <p className="ai-line">{WAITING[entry.id % WAITING.length]}</p>}
               {entry.status === 'error' && <p className="ai-line ai-error">{entry.error}</p>}
               {entry.status === 'ready' && entry.data && <Answer data={entry.data} onAsk={ask} busy={busy} />}
             </div>

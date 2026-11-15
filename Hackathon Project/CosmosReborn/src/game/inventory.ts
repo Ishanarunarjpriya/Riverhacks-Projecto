@@ -1,5 +1,5 @@
 import { SCREEN_CX, SCREEN_H, SCREEN_W } from './constants'
-import { HOTBAR_SLOTS, ICONS, type HotbarItem } from './hotbar'
+import { HOTBAR_SLOTS, drawItemIcon, type HotbarItem } from './hotbar'
 import { ITEMS } from './items'
 import { clamp } from './math'
 import type { Ctx } from './pixel'
@@ -102,7 +102,7 @@ export class InventoryScreen {
       if (!entry) return
       if (over) hovered = entry
       const c = rect.x + rect.size / 2
-      text.image(ICONS[entry.item], 0, 0, 12, 12, c - 5, y + rect.size / 2 - 5, 10, 10)
+      drawItemIcon(text, entry.item, c - 5.5, y + rect.size / 2 - 5.5, 11)
       if (entry.count > 1) text.text(String(entry.count), rect.x + rect.size - 0.5, y + rect.size - 5, '#ffffff', { size: 4.5, align: 'right', weight: 700 })
     }
 

@@ -96,16 +96,29 @@ The lander's assistant lives in the tablet's A.I. app: press Tab to open the tab
 
 What the panel shows, straight from Gemini's response:
 - `text_blocks` as terminal text: paragraphs, headings (amber), bullet lists, tables and code blocks.
-- `references` as a SOURCES list of numbered links (`[1]`, `[2]`, ...) under the answer.
-- Its suggested follow-ups as dashed chips; tapping one sends it as the next question.
+- Up to 4 `references` as a SOURCES list of numbered links (`[1]`, `[2]`, ...) under the answer.
+- Up to 2 suggested follow-ups as dashed chips; tapping one sends it as the next question.
+
+Answers are deliberately short: the persona caps them at one paragraph of about 35 words, so a reply fits the tablet screen without scrolling.
+
+**Persona:** before the first question, the server briefs Gemini as MOONLINK — the damaged core of a lander called the Kestrel: ominous, clipped, second person, treating the dark and the dust as things that listen. The briefing forbids it from inventing game rules, quest objectives, inventory or map locations, so hints stay in-fiction without contradicting the quest tracker. Because the thread is kept with a token, the voice carries through follow-ups for free.
 
 How it stays a conversation: each response returns a `subsequent_request_token`, the client sends it back as `?token=` with the next question, and SerpApi replays the thread to Gemini, so "tell me more about that" keeps its context. Gemini expires tokens quickly, so a rejected token is retried once as a fresh question instead of erroring.
 
-Setup:
+Running locally:
 1. `cp .env.example .env` and paste your key from https://serpapi.com/manage-api-key into `SERPAPI_KEY`.
-2. `npm run dev` (or `npm run preview` for a production build) and open the tablet's A.I. tab.
+2. `npm run dev` and open the tablet's A.I. tab.
 
-The key is only read by the Vite middleware in `vite.config.js`, which serves `GET /api/assist?q=...&token=...`. It is never bundled into the client, so keep `.env` out of version control (already in `.gitignore`). The endpoint returns 503 when the key is missing, so the A.I. app prints "SERPAPI_KEY IS MISSING FROM .env" instead of failing silently, and the header switches to "GEMINI: NO SIGNAL" after a failed query. Answers are cached for 10 minutes per question (including the token) to save SerpApi searches, and each new question costs one search.
+Deploying (Render):
+The assistant cannot live in a static build — `/api/assist` needs a server holding the key. `server.js` is that server: it serves `dist/` and the endpoint, and Render runs it with `npm start`. The key is read from the environment (Render → Environment → `SERPAPI_KEY`), so it still never reaches the browser.
+1. Commit a `render.yaml` blueprint (already in this repo) or create a Web Service pointing at this folder.
+2. Build command `npm install && npm run build`, start command `npm start`.
+3. Add `SERPAPI_KEY` as a secret env var (blueprints leave it unsynced so Render prompts for it).
+4. Health check path `/healthz`.
+
+To run the production build locally: `npm run build && npm start` (defaults to port 3000, honours `PORT`).
+
+Both hosts share `server/assist.js`, which owns the persona, the block/reference mapping, the 10-minute cache and the errors. The endpoint returns 503 when the key is missing, so the A.I. app prints "SERPAPI_KEY IS MISSING FROM .env" instead of failing silently, and the header switches from "SIGNAL: WEAK" to "SIGNAL: LOST" after a failed query. Each new question costs one SerpApi search; repeats are cached per question and thread.
 
 
 
