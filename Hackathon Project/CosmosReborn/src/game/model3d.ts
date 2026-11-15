@@ -50,6 +50,7 @@ export function box(x0: number, x1: number, y0: number, y1: number, z0: number, 
   return {
     faces: [
       { pts: [[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], color: top ?? color, normal: [0, 1, 0] },
+      { pts: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], color, normal: [0, -1, 0] },
       { pts: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], color, normal: [0, 0, 1] },
       { pts: [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0]], color, normal: [0, 0, -1] },
       { pts: [[x1, y0, z0], [x1, y0, z1], [x1, y1, z1], [x1, y1, z0]], color, normal: [1, 0, 0] },
@@ -115,6 +116,12 @@ interface Transformed {
   world: V3[]
 }
 
+interface DrawItem {
+  faces: { face: Face; t: Transformed }[]
+  key: number
+  order: number
+}
+
 export class ModelRenderer {
   private cam: Camera
   private pose: Pose = { x: 0, z: 0, yaw: 0 }
@@ -157,22 +164,24 @@ export class ModelRenderer {
   }
 
   draw(ctx: Ctx, parts: Part[]): void {
-    const items = parts.map((part) => {
+    const items: DrawItem[] = []
+    let order = 0
+    for (const part of parts) {
       const faces = part.faces.map((f) => this.transform(f))
-      let depth = 0
-      let n = 0
-      for (const t of faces) for (const c of t.cam) {
-        depth += c[1]
-        n++
+      if (part.stacked) {
+        let key = 0
+        for (const t of faces) key += cameraDistance(t.cam)
+        items.push({ faces: part.faces.map((face, i) => ({ face, t: faces[i] })), key: key / Math.max(1, faces.length), order: order++ })
+        continue
       }
-      return { part, faces, depth: depth / Math.max(1, n) }
-    })
-    items.sort((a, b) => b.depth - a.depth)
-    for (const item of items) {
-      const order = item.part.faces.map((face, i) => ({ face, t: item.faces[i], depth: avgDepth(item.faces[i].cam) }))
-      if (!item.part.stacked) order.sort((a, b) => b.depth - a.depth)
-      for (const { face, t } of order) this.fill(ctx, face, t)
+      part.faces.forEach((face, i) => {
+        items.push({ faces: [{ face, t: faces[i] }], key: cameraDistance(faces[i].cam), order: order++ })
+      })
     }
+    // Painter's algorithm: draw far faces first so nearer ones cover them. Sorting every
+    // face (rather than whole boxes) stops far sides of a model painting over its near sides.
+    items.sort((a, b) => b.key - a.key || a.order - b.order)
+    for (const item of items) for (const { face, t } of item.faces) this.fill(ctx, face, t)
   }
 
   private transform(face: Face): Transformed {
@@ -184,8 +193,8 @@ export class ModelRenderer {
     if (face.normal) {
       const [nwx, nwy, nwz] = this.rotateNormal(face.normal)
       const [ncx, ncz] = this.cam.rotate(nwx, nwz)
-      const p = t.cam[0]
-      const facing = ncx * -p[0] + nwy * (CAM_HEIGHT - p[2]) + ncz * -p[1]
+      const [fx, fz, fh] = centroid(t.cam)
+      const facing = ncx * -fx + nwy * (CAM_HEIGHT - fh) + ncz * -fz
       if (facing <= 0) {
         if (!face.backColor) return
         color = face.backColor
@@ -229,10 +238,24 @@ function convexHull(points: Pt[]): Pt[] {
   return lower.slice(0, -1).concat(upper.slice(0, -1))
 }
 
-function avgDepth(cam: CamPt[]): number {
-  let s = 0
-  for (const c of cam) s += c[1]
-  return s / Math.max(1, cam.length)
+function centroid(cam: CamPt[]): CamPt {
+  let x = 0
+  let z = 0
+  let h = 0
+  for (const c of cam) {
+    x += c[0]
+    z += c[1]
+    h += c[2]
+  }
+  const n = Math.max(1, cam.length)
+  return [x / n, z / n, h / n]
+}
+
+// Squared distance from a face's centre to the eye, which sits at the origin of the
+// ground plane and CAM_HEIGHT above it. Used as the painter's-algorithm sort key.
+function cameraDistance(cam: CamPt[]): number {
+  const [x, z, h] = centroid(cam)
+  return x * x + z * z + (h - CAM_HEIGHT) * (h - CAM_HEIGHT)
 }
 
 function lightLevel(nx: number, ny: number, nz: number): number {
