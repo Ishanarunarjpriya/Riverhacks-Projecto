@@ -16,6 +16,8 @@ export class Input {
   private held = new Set<string>()
 
   private handleKeyDown = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
     this.onAnyInput()
     if (!e.repeat && this.onKeyPress(e.code)) {
       e.preventDefault()

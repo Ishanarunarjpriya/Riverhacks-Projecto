@@ -1,4 +1,4 @@
-import { BASE_CENTER, BASE_RADIUS, PART_ITEMS, RECIPES, costEntries, type BasePart } from './base'
+import { BASE_CENTER, BASE_RADIUS, PART_ITEMS, RECIPES, UPGRADE_PARTS, costEntries, type BasePart } from './base'
 import { ITEMS, type ItemId } from './items'
 import { wrap } from './math'
 import { ACT_TITLES, QUESTS, type Objective, type Quest } from './quests'
@@ -305,8 +305,25 @@ export class QuestTracker {
     return this.count(item) > 0
   }
 
-  hasTools(): boolean {
-    return this.count('basic-tools') > 0
+  hasPickaxe(): boolean {
+    return this.toolTier() > 0
+  }
+
+  /** 0 = bare hands, 1 = pickaxe, 2 = moon pickaxe. */
+  toolTier(): 0 | 1 | 2 {
+    if (this.count('moon-pickaxe') > 0) return 2
+    if (this.count('pickaxe') > 0) return 1
+    return 0
+  }
+
+  /** A forgeable upgrade that is not built yet, affordable, and unlocked. */
+  nextUpgrade(): BasePart | null {
+    for (const part of UPGRADE_PARTS) {
+      if (this.baseParts.has(part) || !this.canAfford(part)) continue
+      if (part === 'moonpick' && this.toolTier() === 0) continue
+      return part
+    }
+    return null
   }
 
   tick(dt: number, playerX: number, playerZ: number, onSurface = true): void {

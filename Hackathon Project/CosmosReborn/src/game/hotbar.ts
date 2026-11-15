@@ -28,6 +28,54 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
+// Shared pickaxe silhouette: curved steel head over a striped shaft.
+// o = outline, S/s/d = head body, h/H = shaft, y = shaft binding
+const PICKAXE_ART = [
+  '....oooo....',
+  '..ooSSSSoo..',
+  '.oSSSSSSSSo.',
+  'oSSSSooSSSSo',
+  'oSSo..oSSSSo',
+  '.oo....oSooo',
+  '......oyho..',
+  '.....oyh....',
+  '....oyh.....',
+  '...oHh......',
+  '..oHh.......',
+  '..oo........',
+]
+
+const SHAFT_PALETTE: Record<string, string> = {
+  h: '#b07f2c',
+  H: '#8a5a1e',
+  y: '#fac775',
+}
+
+const PICKAXE_PALETTE: Record<string, string> = {
+  ...SHAFT_PALETTE,
+  o: '#2e3352',
+  S: '#e6e6ee',
+  s: '#e6e6ee',
+  d: '#9aa0b8',
+}
+
+const MOON_PICKAXE_PALETTE: Record<string, string> = {
+  ...SHAFT_PALETTE,
+  o: '#141428',
+  S: '#232447',
+  s: '#2e3352',
+  d: '#3f4878',
+}
+
+function paint(g: Ctx, rows: readonly string[], palette: Record<string, string>): void {
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      const color = palette[row[x]]
+      if (color) rect(g, color, x, y, 1, 1)
+    }
+  })
+}
+
 const ICON_DRAWERS: Record<ItemId, (g: Ctx) => void> = {
   'moon-rock': (g) => {
     ellipse(g, '#6c719a', 6, 7, 5, 4)
@@ -59,11 +107,14 @@ const ICON_DRAWERS: Record<ItemId, (g: Ctx) => void> = {
     rect(g, '#e24b4a', 5, 4, 2, 5)
     rect(g, '#e24b4a', 3, 5, 6, 2)
   },
-  'basic-tools': (g) => {
-    rect(g, '#9aa0b8', 5, 3, 1, 8)
-    rect(g, '#e6e6ee', 2, 2, 7, 2)
-    rect(g, '#c9cbe0', 2, 2, 1, 3)
-    rect(g, '#b07f2c', 5, 8, 1, 3)
+  'pickaxe': (g) => paint(g, PICKAXE_ART, PICKAXE_PALETTE),
+  'moon-pickaxe': (g) => {
+    paint(g, PICKAXE_ART, MOON_PICKAXE_PALETTE)
+    // stars caught in the forged head
+    rect(g, '#ffffff', 6, 2, 1, 1)
+    rect(g, '#ffffff', 10, 3, 1, 1)
+    rect(g, '#c9a6ff', 3, 3, 1, 1)
+    rect(g, '#fac775', 8, 4, 1, 1)
   },
   'data-log': (g) => {
     rect(g, '#2e3352', 2, 2, 8, 9)

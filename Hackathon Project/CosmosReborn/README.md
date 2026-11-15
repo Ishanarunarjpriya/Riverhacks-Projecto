@@ -25,7 +25,7 @@ Task/Quest Story Missions
 ACT 1 SURVIVAL
 Crash Landing Explore the crash site and salvage 3 useful supplies. Complete when all are collected.
 First Materials Collect 10 moon rocks, 6 metal scraps, and 4 crystals. Complete when resources are stored.
-A Place to Stay Craft basic tools and build shelter, storage, and power. Complete when all parts work.
+A Place to Stay Craft a pickaxe and build shelter, storage, and power. Complete when all parts work.
 First Exploration Scout nearby Moon terrain and return to base. Complete when a location is mapped.
 Optional: Strange Survival Find early clues about why you can survive without a spacesuit; preserve the mystery.
 
@@ -36,6 +36,7 @@ Anomaly Hunt Investigate 2 anomalies and trace a strange signal. Complete when a
 Growing Settlement Build housing, expanded storage, and reliable power. Complete when the settlement operates.
 A New Community Help survivors and assign gathering, construction, or research jobs. Complete when the settlement can produce supplies.
 Optional: Moon Survey Map hidden areas and collect rare materials.
+Optional: Lunar Tools Forge a moon pickaxe from moon rock, scrap, and anomaly shards. Complete when crafted; it mines in two swings and yields extra rock.
 
 ACT 3 
 Into the Depths Upgrade mining tools and enter the caves. Complete when the first cave is reached.
@@ -89,6 +90,22 @@ Track current act, quest ID, objective counts, inventory, explored areas, creatu
  AI Mission Assistant 
 
 The game will include an AI assistant that helps players when they get stuck or need guidance. It will use the game's quest tracker (in the code not visualized in game) to check the player's current objective, progress, and inventory. For example, if a quest asks the player to collect three moon rocks, the assistant can see how many they have collected and suggest where to search next. Players can also ask questions such as “What should I do next?” or “How do I complete this mission?” The AI will give useful hints without automatically completing the quest. If needed, it could also use information from the current game screen to provide more specific help. 
+
+MOONLINK ASSISTANT (LIVE)
+The lander's assistant lives in the tablet's A.I. app: press Tab to open the tablet, pick the green A.I. tile and ask it anything. Answers come from **Google Gemini** through SerpApi's `google_gemini` engine, so they are written prose rather than a list of links. ◀ HOME (or Esc while the input is empty) returns to the tablet home, Tab closes the tablet, and the conversation survives going back and forth.
+
+What the panel shows, straight from Gemini's response:
+- `text_blocks` as terminal text: paragraphs, headings (amber), bullet lists, tables and code blocks.
+- `references` as a SOURCES list of numbered links (`[1]`, `[2]`, ...) under the answer.
+- Its suggested follow-ups as dashed chips; tapping one sends it as the next question.
+
+How it stays a conversation: each response returns a `subsequent_request_token`, the client sends it back as `?token=` with the next question, and SerpApi replays the thread to Gemini, so "tell me more about that" keeps its context. Gemini expires tokens quickly, so a rejected token is retried once as a fresh question instead of erroring.
+
+Setup:
+1. `cp .env.example .env` and paste your key from https://serpapi.com/manage-api-key into `SERPAPI_KEY`.
+2. `npm run dev` (or `npm run preview` for a production build) and open the tablet's A.I. tab.
+
+The key is only read by the Vite middleware in `vite.config.js`, which serves `GET /api/assist?q=...&token=...`. It is never bundled into the client, so keep `.env` out of version control (already in `.gitignore`). The endpoint returns 503 when the key is missing, so the A.I. app prints "SERPAPI_KEY IS MISSING FROM .env" instead of failing silently, and the header switches to "GEMINI: NO SIGNAL" after a failed query. Answers are cached for 10 minutes per question (including the token) to save SerpApi searches, and each new question costs one search.
 
 
 

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { SCREEN_H, SCREEN_W } from '../game/constants'
 import { Game } from '../game/game'
+import type { ScreenRect } from '../game/tablet'
+import Assistant from './Assistant'
 import DevMenu from './DevMenu'
 
 function fitFrame(frame: HTMLDivElement): void {
@@ -18,6 +20,7 @@ export default function GameScreen() {
   const textRef = useRef<HTMLCanvasElement>(null)
   const [game, setGame] = useState<Game | null>(null)
   const [devOpen, setDevOpen] = useState(false)
+  const [aiScreen, setAiScreen] = useState<ScreenRect | null>(null)
 
   useEffect(() => {
     const frame = frameRef.current
@@ -46,19 +49,29 @@ export default function GameScreen() {
   }, [])
 
   useEffect(() => {
+    const typing = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    }
     const onKey = (e: KeyboardEvent) => {
       const toggle = e.code === 'Backquote' || e.key === '`' || e.key === '~'
-      if (toggle && !e.repeat) setDevOpen((open) => !open)
+      if (toggle && !e.repeat && !typing(e.target)) setDevOpen((open) => !open)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  useEffect(() => {
+    if (!game) return
+    return game.subscribeAssistantScreen(setAiScreen)
+  }, [game])
 
   return (
     <>
       <div ref={frameRef} className="game-frame">
         <canvas ref={canvasRef} className="game-canvas" aria-label="Cosmos Reborn game" />
         <canvas ref={textRef} className="game-text" aria-hidden="true" />
+        {game && aiScreen && <Assistant rect={aiScreen} onBack={() => game.tabletHome()} />}
       </div>
       {devOpen && game && <DevMenu game={game} onClose={() => setDevOpen(false)} />}
     </>

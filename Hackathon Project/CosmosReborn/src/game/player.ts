@@ -22,6 +22,8 @@ export interface Controls {
 export interface Gear {
   armor: boolean
   blaster: boolean
+  /** 0 = no pickaxe, 1 = pickaxe, 2 = moon pickaxe. */
+  pickaxe: 0 | 1 | 2
 }
 
 export const NO_CONTROLS: Controls = { forward: 0, turn: 0, jump: false, fire: false }
@@ -48,6 +50,7 @@ export class Player {
   turn = 0
   jumpCooldown = 0
   actionTime = 0
+  swingTier: 0 | 1 | 2 = 1
   speedMult = 1
   events: PlayerEvent[] = []
 
@@ -142,7 +145,7 @@ export class Player {
     return true
   }
 
-  draw(ctx: Ctx, sx: number, sy: number, scale: number, holdingTablet: boolean, gear: Gear = { armor: false, blaster: false }): void {
+  draw(ctx: Ctx, sx: number, sy: number, scale: number, holdingTablet: boolean, gear: Gear = { armor: false, blaster: false, pickaxe: 0 }): void {
     const fy = Math.round(sy - this.y * scale)
     const air = !this.grounded
     const frame = this.moving && !air ? Math.floor(this.walkTime * 8) % 4 : -1
@@ -162,10 +165,19 @@ export class Player {
       rect(ctx, BOOT, sx + 1, fy - 1 - liftR, 2, 1)
     }
 
+    const mining = this.actionTime > 0
+    const tier = gear.pickaxe ?? 0
+    if (tier > 0 && !air && !holdingTablet && !mining) {
+      // pickaxe slung across the back
+      rect(ctx, '#b07f2c', sx - 7, fy - 6, 1, 4)
+      rect(ctx, '#8a5a1e', sx - 8, fy - 4, 1, 2)
+      rect(ctx, tier >= 2 ? '#232447' : '#c9cbe0', sx - 8, fy - 8, 3, 1)
+      rect(ctx, tier >= 2 ? '#c9a6ff' : '#e6e6ee', sx - 7, fy - 8, 1, 1)
+    }
+
     rect(ctx, SUIT, sx - 4, fy - 11, 8, 6)
     rect(ctx, '#c9cbe0', sx - 3, fy - 11, 6, 1)
 
-    const mining = this.actionTime > 0
     if (air) {
       rect(ctx, SUIT_SHADE, sx - 5, fy - 14, 1, 4)
       rect(ctx, SUIT_SHADE, sx + 4, fy - 14, 1, 4)
@@ -177,9 +189,11 @@ export class Player {
       rect(ctx, SUIT_SHADE, sx - 5, fy - 10 + swing, 1, 4)
       if (mining) {
         const up = this.actionTime > 0.15
-        rect(ctx, SUIT_SHADE, sx + 4, fy - (up ? 14 : 11), 1, 4)
-        rect(ctx, '#9aa0b8', sx + 4, fy - (up ? 16 : 9), 1, 3)
-        rect(ctx, '#e6e6ee', sx + (up ? 3 : 5), fy - (up ? 17 : 8), 3, 1)
+        const swingTier = this.swingTier
+        rect(ctx, '#b07f2c', sx + 4, fy - (up ? 14 : 11), 1, 4)
+        rect(ctx, swingTier >= 2 ? '#3f4878' : '#9aa0b8', sx + 4, fy - (up ? 16 : 9), 1, 3)
+        rect(ctx, swingTier >= 2 ? '#232447' : '#e6e6ee', sx + (up ? 3 : 5), fy - (up ? 17 : 8), 3, 1)
+        if (swingTier >= 2) rect(ctx, '#c9a6ff', sx + (up ? 3 : 5), fy - (up ? 17 : 8), 1, 1)
       } else {
         rect(ctx, SUIT_SHADE, sx + 4, fy - 10 - swing, 1, 4)
       }

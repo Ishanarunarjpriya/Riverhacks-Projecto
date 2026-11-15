@@ -39,7 +39,7 @@ import { NO_CONTROLS, Player } from './player'
 import { REGIONS, regionAt } from './regions'
 import { Sky } from './sky'
 import { INSPECTIONS, STRUCTURES, drawStructure, type Structure } from './structures'
-import { Tablet, type TabletView } from './tablet'
+import { Tablet, type ScreenRect, type TabletView } from './tablet'
 import {
   JOB_OUTPUT,
   PRODUCTION_INTERVAL,
@@ -130,6 +130,7 @@ export interface GameStateForAI extends TrackerSnapshot {
   signalSource: Bearing | null
   nearestUnscannedCreature: Bearing | null
   nearestUninvestigatedAnomaly: Bearing | null
+  nearestBoulder: (Bearing & { x: number; z: number }) | null
 }
 
 const INSPECT_RANGE = 5
@@ -164,6 +165,8 @@ export class Game {
   private glows: { x: number; y: number; color: string }[] = []
   private devGod = false
   private showMinimap = SHOW_MINIMAP
+  private aiScreenKey = ''
+  private aiListeners = new Set<(rect: ScreenRect | null) => void>()
   private fps = 60
   private sky = new Sky()
   private camera = new Camera()
@@ -222,7 +225,7 @@ export class Game {
       this.sound('select')
     }
     this.input.onScroll = (d) => {
-      if (!this.playing) return
+      if (!this.playing || this.tablet.visible || this.inventory.visible) return
       this.hotbar.select(this.hotbar.selected + d, this.time)
       this.sound('select')
     }
@@ -347,7 +350,7 @@ export class Game {
   }
 
   devGiveGear(): void {
-    const missing = (['basic-tools', 'power-drill', 'armor-plating', 'blaster'] as ItemId[]).filter((i) => !this.tracker.hasItem(i))
+    const missing = (['pickaxe', 'power-drill', 'armor-plating', 'blaster'] as ItemId[]).filter((i) => !this.tracker.hasItem(i))
     this.tracker.devGive(Object.fromEntries(missing.map((i) => [i, 1])))
   }
 
@@ -395,6 +398,27 @@ export class Game {
   devToggleMinimap(): boolean {
     this.showMinimap = !this.showMinimap
     return this.showMinimap
+  }
+
+  tabletHome(): void {
+    this.tablet.back()
+  }
+
+  /** Listens for the tablet's A.I. app opening/closing; emits its screen rect in game pixels. */
+  subscribeAssistantScreen(listener: (rect: ScreenRect | null) => void): () => void {
+    this.aiListeners.add(listener)
+    listener(this.tablet.aiScreenRect())
+    return () => {
+      this.aiListeners.delete(listener)
+    }
+  }
+
+  private syncAssistantScreen(): void {
+    const rect = this.tablet.aiScreenRect()
+    const key = rect ? `${rect.x}:${rect.y}:${rect.w}:${rect.h}` : ''
+    if (key === this.aiScreenKey) return
+    this.aiScreenKey = key
+    for (const listener of this.aiListeners) listener(rect)
   }
 
   devRevealAll(): void {
@@ -471,7 +495,23 @@ export class Game {
         : null,
       nearestUnscannedCreature: this.nearestOf(this.creatures.filter((c) => !c.scanned)),
       nearestUninvestigatedAnomaly: this.nearestOf(ANOMALIES.filter((a) => !tracker.anomalies.includes(a.id))),
+      nearestBoulder: this.nearestBoulder(),
     }
+  }
+
+  private nearestBoulder(): (Bearing & { x: number; z: number }) | null {
+    let best: Boulder | null = null
+    let bestDist = Infinity
+    for (const b of this.world.boulders) {
+      if (b.broken) continue
+      const d = this.distanceTo(b.x, b.z)
+      if (d < bestDist) {
+        bestDist = d
+        best = b
+      }
+    }
+    if (!best) return null
+    return { distance: Math.round(bestDist), direction: this.directionTo(best.x, best.z), x: Math.round(best.x), z: Math.round(best.z) }
   }
 
   private nearestOf(points: { x: number; z: number }[]): Bearing | null {
@@ -492,6 +532,8 @@ export class Game {
   }
 
   private skipCutscene = (e: KeyboardEvent) => {
+    const el = e.target as HTMLElement | null
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
     if (!this.cutscene.done && !e.repeat) this.cutscene.skip()
   }
 
@@ -523,6 +565,7 @@ export class Game {
     }
 
     this.tablet.update(dt)
+    this.syncAssistantScreen()
     this.inventory.update(dt)
     this.sky.update(dt)
     this.fade = Math.max(0, this.fade - dt * 1.5)
@@ -903,9 +946,9 @@ export class Game {
     for (const b of world.boulders) {
       if (b.broken || b.hp > 3) continue
       consider(b.x, b.z, b.r, MINE_RANGE, () =>
-        tracker.hasTools()
+        tracker.hasPickaxe()
           ? { title: '[E] MINE BOULDER', detail: `${b.hp} ${b.hp === 1 ? 'HIT' : 'HITS'} LEFT`, ok: true, run: () => this.mine(b) }
-          : { title: 'BOULDER', detail: 'CRAFT BASIC TOOLS TO MINE IT', ok: false },
+          : { title: 'BOULDER', detail: 'CRAFT A PICKAXE TO MINE IT', ok: false },
       )
     }
 
@@ -945,8 +988,9 @@ export class Game {
   }
 
   private buildInteraction(): Interaction | null {
-    const part = this.tracker.nextPart()
-    if (!part || !this.atBase()) return null
+    if (!this.atBase()) return null
+    const part = this.tracker.nextPart() ?? this.tracker.nextUpgrade()
+    if (!part) return null
     const recipe = RECIPES[part]
     const spot = PART_STRUCTURES[part]
     if (spot && this.distanceTo(spot.x, spot.z) < spot.radius + 1.5) {
@@ -974,18 +1018,22 @@ export class Game {
   }
 
   private mine(b: Boulder): void {
+    const tier = this.tracker.toolTier()
+    if (tier === 0) return
     this.player.actionTime = 0.3
-    b.hp--
+    this.player.swingTier = tier
+    b.hp -= tier >= 2 ? 2 : 1
     b.shake = 0.25
-    this.spawnBurst(b.x, b.z, b.height * 0.6, 5, '#9aa0c0', 3)
+    this.spawnBurst(b.x, b.z, b.height * 0.6, tier >= 2 ? 7 : 5, tier >= 2 ? '#c9a6ff' : '#9aa0c0', 3)
     if (b.hp > 0) {
       this.sound('hit')
       return
     }
     b.broken = true
     this.sound('break')
-    this.spawnBurst(b.x, b.z, b.height * 0.5, 16, '#c9cbe0', 6)
-    this.tracker.collect('moon-rock', 2)
+    this.spawnBurst(b.x, b.z, b.height * 0.5, 16, tier >= 2 ? '#e2e5f2' : '#c9cbe0', 6)
+    this.tracker.collect('moon-rock', tier >= 2 ? 3 : 2)
+    if (tier >= 2 && !this.onSurface && Math.random() < 0.25) this.tracker.collect('rare-ore', 1)
     this.tracker.mineBoulder()
   }
 
@@ -1018,9 +1066,11 @@ export class Game {
   }
 
   private inventoryItems(): HotbarItem[] {
-    return this.tracker.itemOrder
-      .filter((item) => this.tracker.count(item) > 0)
-      .map((item) => ({ item, count: this.tracker.count(item) }))
+    const owned = this.tracker.itemOrder.filter((item) => this.tracker.count(item) > 0)
+    // Tools and gear come first so the equipped pickaxe stays in the hotbar.
+    const gear: ItemId[] = ['pickaxe', 'moon-pickaxe', 'power-drill', 'armor-plating', 'blaster']
+    const ordered = [...gear.filter((item) => owned.includes(item)), ...owned.filter((item) => !gear.includes(item))]
+    return ordered.map((item) => ({ item, count: this.tracker.count(item) }))
   }
 
   private hotbarItems(): HotbarItem[] {
@@ -1317,7 +1367,7 @@ export class Game {
     const [ox, oz] = cam.rotate(-0.5, -0.5)
     fillPolygon(ctx, '#2e3560', cam.projectPolygon(ring(pos.rx + ox, pos.rz + oz, 1.2 - Math.min(0.6, lift * 0.12), ground, 14)))
 
-    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.tracker.hasItem('blaster') })
+    player.draw(ctx, p.sx, p.sy, p.scale, this.tablet.visible, { armor: this.tracker.hasItem('armor-plating'), blaster: this.tracker.hasItem('blaster'), pickaxe: this.tracker.toolTier() })
     if (sunk) ctx.restore()
   }
 }

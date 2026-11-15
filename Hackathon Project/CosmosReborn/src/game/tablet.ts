@@ -35,6 +35,13 @@ interface Layout {
   SH: number
 }
 
+export interface ScreenRect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface TabletView {
   world: World
   playerX: number
@@ -73,6 +80,21 @@ export class Tablet {
 
   close(): void {
     this.open = false
+  }
+
+  back(): void {
+    this.screen = 'home'
+  }
+
+  /**
+   * Screen area used by the A.I. app, in game pixels, or null when it is not on screen.
+   * The HTML assistant panel is positioned over this rect, just under the tablet title.
+   */
+  aiScreenRect(): ScreenRect | null {
+    if (!this.open || !this.ready || this.screen !== 'ai') return null
+    const TX = (SCREEN_W - TW) / 2
+    const SY = 22 + 10
+    return { x: TX + 10, y: SY + 11, w: TW - 20, h: TH - 20 - 11 }
   }
 
   handleKey(code: string): boolean {
@@ -201,22 +223,7 @@ export class Tablet {
 
     if (this.screen === 'map') this.drawMapText(text, SX, SY, view)
     else if (this.screen === 'quests') this.drawQuests(text, SX, SY, SW, view.tracker)
-    else if (this.screen === 'ai') {
-      const lines = [
-        '> A.I. CORE ............ DAMAGED',
-        '> RUNNING DIAGNOSTIC.......',
-        '> HELLO.',
-        '> YOU ARE AWAKE. THAT WAS NOT SUPPOSED TO HAPPEN.',
-        '> ...',
-        '> [ASSISTANT MODULE NOT INSTALLED]',
-      ]
-      let budget = Math.floor(this.appTime * 22)
-      lines.forEach((line, i) => {
-        const n = clamp(budget, 0, line.length)
-        budget -= line.length + 8
-        if (n > 0) text.text(line.slice(0, n), SX + 8, SY + 16 + i * 9, i === 3 ? '#ff8a7a' : '#5dcaa5', { size: 5.5, weight: 500 })
-      })
-    } else if (this.screen === 'scan') {
+    else if (this.screen === 'scan') {
       text.text('LIFE SIGNS: 0', SX + 8, SY + 16, '#e0884a', { size: 5.5 })
       if (Math.sin(time * 2.3) > 0.4) text.text('LIFE SIGNS: 1?', SX + 8, SY + 24, '#ff8a7a', { size: 5.5 })
       text.text('SCANNER CALIBRATION REQUIRED', SX + SW / 2, SY + SH - 10, '#5a63a0', { size: 4.8, align: 'center' })

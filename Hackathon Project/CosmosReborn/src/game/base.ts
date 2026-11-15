@@ -1,7 +1,19 @@
 import type { ItemId } from './items'
 import type { Structure } from './structures'
 
-export type BasePart = 'tools' | 'shelter' | 'storage' | 'power' | 'housing' | 'silo' | 'array' | 'drill' | 'armor' | 'blaster' | 'turret'
+export type BasePart =
+  | 'tools'
+  | 'moonpick'
+  | 'shelter'
+  | 'storage'
+  | 'power'
+  | 'housing'
+  | 'silo'
+  | 'array'
+  | 'drill'
+  | 'armor'
+  | 'blaster'
+  | 'turret'
 
 export const BASE_CENTER = { x: 16, z: 30 } as const
 export const BASE_HALF = 12
@@ -13,7 +25,8 @@ export interface Recipe {
 }
 
 export const RECIPES: Record<BasePart, Recipe> = {
-  tools: { name: 'BASIC TOOLS', cost: { 'moon-rock': 2, 'metal-scrap': 2 } },
+  tools: { name: 'PICKAXE', cost: { 'moon-rock': 2, 'metal-scrap': 2 } },
+  moonpick: { name: 'MOON PICKAXE', cost: { 'moon-rock': 8, 'metal-scrap': 4, 'anomaly-shard': 2 } },
   shelter: { name: 'SHELTER', cost: { 'moon-rock': 4, 'metal-scrap': 2 } },
   storage: { name: 'STORAGE', cost: { 'moon-rock': 3, 'metal-scrap': 1 } },
   power: { name: 'POWER', cost: { 'moon-rock': 1, 'metal-scrap': 1, 'power-cell': 1 } },
@@ -27,11 +40,16 @@ export const RECIPES: Record<BasePart, Recipe> = {
 }
 
 export const PART_ITEMS: Partial<Record<BasePart, ItemId>> = {
-  tools: 'basic-tools',
+  tools: 'pickaxe',
+  moonpick: 'moon-pickaxe',
   drill: 'power-drill',
   armor: 'armor-plating',
   blaster: 'blaster',
 }
+
+// Gear you can forge at the base at any time (once you can afford it), not just when a
+// quest asks for it. Used by the build prompt as a fallback.
+export const UPGRADE_PARTS: readonly BasePart[] = ['moonpick']
 
 export const PART_STRUCTURES: Partial<Record<BasePart, Structure>> = {
   shelter: { kind: 'shelter', name: 'SHELTER', x: 22, z: 38, radius: 4.5, mapColor: '#ffffff' },
