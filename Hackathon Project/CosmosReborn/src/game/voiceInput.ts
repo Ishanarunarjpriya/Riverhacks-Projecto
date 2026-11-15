@@ -8,7 +8,13 @@ interface VoiceOptions {
   onQuery: (query: string) => boolean
 }
 
-const WAKE = /^\s*(?:hey|hi|okay|ok)[,.!]?\s+(?:a\.?i\.?|moonlink)\b[\s,.:;!?-]*(.*)$/i
+// Speech-to-text writes the wake phrase many ways: "Hey AI", "Hey, A. I.", "Hey eye",
+// "Hey I", "Hay AI", "Uh, hey AI", "Okay Moonlink". Accept them all, plus a bare "AI, ...".
+const FILLER = String.raw`(?:(?:uh|um|so|oh|and|well)\W+)?`
+const GREETING = String.raw`(?:(?:hey|hi|hay|hei|heya|okay|ok|yo)\W+)+`
+const NAME = String.raw`(?:a\W{0,3}i|eye|aye|ay|al|i|moon\W?link)`
+const WAKE = new RegExp(String.raw`^\W*${FILLER}${GREETING}${NAME}\b\W*(.*)$`, 'is')
+const BARE_WAKE = new RegExp(String.raw`^\W*(?:a\W{0,3}i|moon\W?link)\b\W*(.*)$`, 'is')
 const MAX_UTTERANCE_MS = 12_000
 const MIN_START_LEVEL = 0.05
 const MIN_STOP_LEVEL = 0.02
@@ -19,7 +25,7 @@ const CALIBRATION_TICKS = 9
 /** Split "Hey AI, how do I make air?" into the wake flag and the question. */
 export function parseWake(text: string): { woken: boolean; question: string } {
   const clean = text.replace(/\s+/g, ' ').trim()
-  const match = clean.match(WAKE)
+  const match = clean.match(WAKE) ?? clean.match(BARE_WAKE)
   if (!match) return { woken: false, question: clean }
   return { woken: true, question: match[1].trim() }
 }
@@ -285,7 +291,8 @@ export class VoiceInput {
       query = text
       this.armed = false
     } else {
-      this.resume('SAY "HEY AI ..." FIRST')
+      const heard = text.length > 28 ? `${text.slice(0, 26)}...` : text
+      this.resume(`HEARD "${heard.toUpperCase()}". START WITH "HEY AI"`)
       return
     }
 
