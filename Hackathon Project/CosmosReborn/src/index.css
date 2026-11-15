@@ -437,3 +437,228 @@ body {
   border-color: #5dcaa5;
   color: #5dcaa5;
 }
+
+/* Multiplayer lobby over the title screen. Sized in container units so it scales with the game. */
+.lobby {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 4, 15, 0.72);
+}
+
+.lobby-panel {
+  width: 62cqw;
+  max-height: 92cqh;
+  overflow: auto;
+  box-sizing: border-box;
+  background:
+    repeating-linear-gradient(0deg, rgba(93, 202, 165, 0.05) 0 1px, transparent 1px 3px),
+    #0b1830;
+  border: 1px solid #3a3f68;
+  box-shadow: 0 0 0 2px #05040f, 0 0 24px rgba(93, 202, 165, 0.15);
+  color: #9aa2cf;
+  font: 4.4cqh/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.lobby-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5em 0.8em;
+  border-bottom: 1px solid #1d3358;
+}
+
+.lobby-title {
+  color: #5dcaa5;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 4px rgba(93, 202, 165, 0.45);
+}
+
+.lobby-x {
+  background: none;
+  border: 1px solid #2f3560;
+  color: #9aa2cf;
+  font: inherit;
+  font-size: 0.8em;
+  padding: 0.1em 0.5em;
+  cursor: pointer;
+}
+
+.lobby-x:hover,
+.lobby-x:focus-visible {
+  color: #fac775;
+  border-color: #fac775;
+  outline: none;
+}
+
+.lobby-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.8em;
+}
+
+.lobby-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  font-size: 0.85em;
+  letter-spacing: 0.08em;
+}
+
+.lobby input {
+  background: #08111f;
+  border: 1px solid #2f3560;
+  color: #e9ecfa;
+  font: inherit;
+  font-size: 1.05em;
+  padding: 0.3em 0.5em;
+  outline: none;
+  min-width: 0;
+}
+
+.lobby input:focus {
+  border-color: #fac775;
+}
+
+.lobby input::placeholder {
+  color: #46507e;
+}
+
+.lobby-row {
+  display: flex;
+  gap: 0.5em;
+}
+
+.lobby-code {
+  flex: 1;
+  text-align: center;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+}
+
+.lobby-btn {
+  flex: 1;
+  background: #14223e;
+  border: 1px solid #3a3f68;
+  color: #fac775;
+  font: inherit;
+  letter-spacing: 0.08em;
+  padding: 0.4em 0.7em;
+  cursor: pointer;
+}
+
+.lobby-btn.primary {
+  background: #1d5c4a;
+  border-color: #5dcaa5;
+  color: #e9fff6;
+}
+
+.lobby-btn:hover:not(:disabled),
+.lobby-btn:focus-visible {
+  border-color: #fac775;
+  outline: none;
+}
+
+.lobby-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lobby-or {
+  text-align: center;
+  font-size: 0.8em;
+  letter-spacing: 0.12em;
+  color: #5b6496;
+}
+
+.lobby-note {
+  margin: 0;
+  font-size: 0.8em;
+  color: #6c76a8;
+}
+
+.lobby-error {
+  margin: 0;
+  font-size: 0.85em;
+  color: #ff8a7a;
+}
+
+.lobby-code-show {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 0.85em;
+  letter-spacing: 0.1em;
+}
+
+.lobby-code-show strong {
+  color: #fac775;
+  font-size: 2.2em;
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 6px rgba(250, 199, 117, 0.35);
+}
+
+.lobby-players {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35em;
+}
+
+.lobby-players li {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.3em 0.45em;
+  background: #08111f;
+  border: 1px solid #1d3358;
+  color: #e9ecfa;
+}
+
+.lobby-players li.empty {
+  color: #46507e;
+  border-style: dashed;
+}
+
+.lobby-players i {
+  width: 0.7em;
+  height: 0.7em;
+  flex: none;
+  background: #2f3560;
+}
+
+.lobby-players em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 0.75em;
+  color: #5dcaa5;
+}
+
+.lobby-choice {
+  display: flex;
+  gap: 0.4em;
+}
+
+.lobby-choice button {
+  flex: 1;
+  background: #08111f;
+  border: 1px solid #2f3560;
+  color: #9aa2cf;
+  font: inherit;
+  font-size: 0.85em;
+  padding: 0.3em;
+  cursor: pointer;
+}
+
+.lobby-choice button.on {
+  border-color: #fac775;
+  color: #fac775;
+}

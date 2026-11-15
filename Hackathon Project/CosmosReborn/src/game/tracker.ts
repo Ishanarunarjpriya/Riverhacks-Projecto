@@ -81,6 +81,30 @@ const SAVED_FIELDS = [
   'clues', 'completed', 'dishTuned', 'satelliteOnline', 'roverFixed',
 ] as const
 
+export type CountField = 'collected' | 'placed' | 'mined' | 'defeated' | 'blocksPlaced' | 'repairs' | 'suppliesCollected'
+
+/** Fields that belong to one player, never shared in multiplayer. */
+const PERSONAL_FIELDS = new Set<string>(['inventory', 'itemOrder', 'currentRegion'])
+
+function mergeValue(mine: unknown, theirs: unknown, authoritative: boolean): unknown {
+  if (theirs === undefined) return mine
+  if (mine === undefined || mine === null) return theirs
+  if (Array.isArray(mine) && Array.isArray(theirs)) {
+    const out = [...mine]
+    const seen = new Set(mine.map((v) => JSON.stringify(v)))
+    for (const v of theirs) if (!seen.has(JSON.stringify(v))) out.push(v)
+    return out
+  }
+  if (typeof mine === 'number' && typeof theirs === 'number') return Math.max(mine, theirs)
+  if (typeof mine === 'boolean' && typeof theirs === 'boolean') return mine || theirs
+  if (typeof mine === 'object' && typeof theirs === 'object' && theirs !== null) {
+    const out: Record<string, unknown> = { ...(mine as Record<string, unknown>) }
+    for (const [k, v] of Object.entries(theirs as Record<string, unknown>)) out[k] = mergeValue(out[k], v, authoritative)
+    return out
+  }
+  return authoritative ? (theirs ?? mine) : mine
+}
+
 export class QuestTracker {
   inventory: Partial<Record<ItemId, number>> = {}
   itemOrder: ItemId[] = []
@@ -125,6 +149,24 @@ export class QuestTracker {
   lost: string[] = []
   clues: string[] = []
   completed: string[] = []
+  /** Multiplayer: called when a shared counter goes up, so a guest can tell the host. */
+  onCount: ((field: CountField, item?: ItemId, amount?: number) => void) | null = null
+
+  /** Host side: add a guest's contribution to a shared counter. */
+  addCount(field: CountField, item?: ItemId, amount = 1): void {
+    const n = Math.max(0, Math.min(500, amount))
+    if (field === 'collected' && item) this.collected[item] = (this.collected[item] ?? 0) + n
+    else if (field === 'placed' && item) this.placed[item] = (this.placed[item] ?? 0) + n
+    else if (field === 'mined') this.mined += n
+    else if (field === 'defeated') this.defeated += n
+    else if (field === 'blocksPlaced') this.blocksPlaced += n
+    else if (field === 'repairs') this.repairs += n
+    else if (field === 'suppliesCollected') this.suppliesCollected += n
+    this.check()
+  }
+
+  /** Bumped on story rewinds so multiplayer guests replace instead of merge. */
+  epoch = 0
   messages: Message[] = []
   sounds: TrackerSound[] = []
   time = 0
@@ -159,6 +201,67 @@ export class QuestTracker {
     this.pendingSounds = []
     const quest = this.activeQuest
     this.say('act', 'WELCOME BACK', quest ? `ACT ${roman(quest.act)} · ${quest.title.toUpperCase()}` : 'THE MOON REMEMBERS YOU', '#fac775', 0.3)
+  }
+
+  /** The story and world progress shared with other players (no inventory). */
+  sharedSave(): Record<string, unknown> {
+    const out = this.toSave()
+    for (const key of PERSONAL_FIELDS) delete out[key]
+    out.epoch = this.epoch
+    return out
+  }
+
+  /**
+   * Combines another player's progress with ours. Progress only grows, so lists are
+   * unioned and counters take the larger value; the host's copy wins anything else.
+   * New completions and quests are announced as if they happened here.
+   */
+  mergeShared(data: Record<string, unknown>, authoritative: boolean): void {
+    const self = this as unknown as Record<string, unknown>
+    const theirEpoch = (data.epoch as number) ?? 0
+    if (!authoritative && theirEpoch < this.epoch) return
+    const replace = authoritative && theirEpoch > this.epoch
+    const doneBefore = new Set(this.completed)
+    const questBefore = this.activeQuest
+    for (const key of SAVED_FIELDS) {
+      if (PERSONAL_FIELDS.has(key) || !(key in data)) continue
+      self[key] = replace ? data[key] : mergeValue(self[key], data[key], authoritative)
+    }
+    if (authoritative) {
+      // The host decides who is gone and what was chosen.
+      this.lost = (data.lost as string[]) ?? this.lost
+      this.choice = (data.choice as QuestTracker['choice']) ?? this.choice
+    }
+    this.recruited = this.recruited.filter((n) => !this.lost.includes(n))
+    const parts = (data.baseParts as BasePart[]) ?? []
+    const returned = (data.returnedToBase as string[]) ?? []
+    if (replace) {
+      this.baseParts = new Set(parts)
+      this.returnedToBase = new Set(returned)
+      this.epoch = theirEpoch
+    } else {
+      for (const p of parts) this.baseParts.add(p)
+      for (const r of returned) this.returnedToBase.add(r)
+    }
+    const firstOpen = this.mainQuests.findIndex((q) => !this.completed.includes(q.id))
+    this.mainIndex = firstOpen === -1 ? this.mainQuests.length : firstOpen
+    if (!this.started) return
+    let delay = 0
+    for (const quest of QUESTS) {
+      if (doneBefore.has(quest.id) || !this.completed.includes(quest.id)) continue
+      this.say('complete', 'QUEST COMPLETE', quest.title.toUpperCase(), '#fac775', delay)
+      this.sounds.push('complete')
+      delay += 2.4
+    }
+    const next = this.activeQuest
+    if (next && next.id !== questBefore?.id) {
+      if (questBefore && next.act !== questBefore.act) {
+        this.say('act', `ACT ${roman(next.act)}`, ACT_TITLES[next.act] ?? '', '#fac775', delay)
+        delay += 3.1
+      }
+      this.announce(next, delay)
+    }
+    this.check()
   }
 
   get activeQuest(): Quest | null {
@@ -238,6 +341,7 @@ export class QuestTracker {
   collectSupplies(items: Partial<Record<ItemId, number>>): void {
     for (const [item, n] of Object.entries(items) as [ItemId, number][]) if (n > 0) this.collect(item, n)
     this.suppliesCollected++
+    this.onCount?.('suppliesCollected')
     this.check()
   }
 
@@ -267,6 +371,7 @@ export class QuestTracker {
   collect(item: ItemId, amount = 1): void {
     this.add(item, amount)
     this.collected[item] = (this.collected[item] ?? 0) + amount
+    this.onCount?.('collected', item, amount)
     this.toast(`+${amount} ${ITEMS[item].name}`, ITEMS[item].color)
     this.sounds.push('pickup')
     this.check()
@@ -299,6 +404,7 @@ export class QuestTracker {
 
   mineBoulder(): void {
     this.mined++
+    this.onCount?.('mined')
     this.check()
   }
 
@@ -350,6 +456,7 @@ export class QuestTracker {
 
   placeKit(item: ItemId): void {
     this.placed[item] = (this.placed[item] ?? 0) + 1
+    this.onCount?.('placed', item)
     this.sounds.push('build')
     this.check()
   }
@@ -399,6 +506,7 @@ export class QuestTracker {
 
   repair(name: string): void {
     this.repairs++
+    this.onCount?.('repairs')
     this.toast(`REPAIRED ${name}`, '#9fe1cb')
     this.sounds.push('build')
     this.check()
@@ -447,6 +555,7 @@ export class QuestTracker {
   }
 
   rewindToChoice(): void {
+    this.epoch++
     const idx = this.mainQuests.findIndex((q) => q.id === 'act4.hard-choice')
     if (idx < 0) return
     const drop = new Set(this.mainQuests.slice(idx).map((q) => q.id))
@@ -504,6 +613,7 @@ export class QuestTracker {
 
   placeBlock(): void {
     this.blocksPlaced++
+    this.onCount?.('blocksPlaced')
     this.check()
   }
 
@@ -524,6 +634,7 @@ export class QuestTracker {
 
   defeatEnemy(): void {
     this.defeated++
+    this.onCount?.('defeated')
     this.check()
   }
 

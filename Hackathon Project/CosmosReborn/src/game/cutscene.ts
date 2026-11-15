@@ -74,6 +74,13 @@ export class Cutscene {
   private cues = new Set<string>()
   private flame = 0
 
+  /** How many astronauts walk out of the crash (multiplayer crews). */
+  private crew = 1
+
+  setCrew(count: number): void {
+    this.crew = Math.max(1, Math.min(4, count))
+  }
+
   constructor(kind: CutsceneKind = 'intro') {
     this.kind = kind
     for (const [, line, voice] of VOICE_LINES[kind]) preloadVoice(line, voice)
@@ -288,6 +295,14 @@ export class Cutscene {
     const ax = lx + 12 + walk * 70
     const ay = ly
     const step = walk > 0 && walk < 1 ? Math.floor(local * 6) % 2 : 0
+    // Crewmates follow the first astronaut out of the wreck, a step behind each other.
+    for (let i = this.crew - 1; i >= 1; i--) {
+      const w = clamp((local - 1 - i * 0.45) / 2.2, 0, 1)
+      if (w <= 0) continue
+      const cx = lx + 12 + w * (70 - i * 16)
+      const cstep = w > 0 && w < 1 ? Math.floor(local * 6 + i) % 2 : 0
+      this.drawAstronaut(ctx, cx, ay + (i % 2) * 2, cstep, local > 3.6 + i * 0.15, local)
+    }
     this.drawAstronaut(ctx, ax, ay, step, local > 3.4, local)
 
     if (local > 3.4 && local < 4.6) text.text('*hhkk...*', ax + 10, ay - 30, '#9aa2cf', { size: 5 })

@@ -4,6 +4,7 @@ import { Game } from '../game/game'
 import type { ScreenRect } from '../game/tablet'
 import Assistant from './Assistant'
 import DevMenu from './DevMenu'
+import Lobby from './Lobby'
 
 function fitFrame(frame: HTMLDivElement): void {
   const vv = window.visualViewport
@@ -21,6 +22,7 @@ export default function GameScreen() {
   const [game, setGame] = useState<Game | null>(null)
   const [devOpen, setDevOpen] = useState(false)
   const [aiScreen, setAiScreen] = useState<ScreenRect | null>(null)
+  const [lobby, setLobby] = useState(false)
 
   useEffect(() => {
     const frame = frameRef.current
@@ -66,12 +68,18 @@ export default function GameScreen() {
     return game.subscribeAssistantScreen(setAiScreen)
   }, [game])
 
+  useEffect(() => {
+    if (!game) return
+    return game.subscribeLobby(setLobby)
+  }, [game])
+
   return (
     <>
       <div ref={frameRef} className="game-frame">
         <canvas ref={canvasRef} className="game-canvas" aria-label="Cosmos Reborn game" />
         <canvas ref={textRef} className="game-text" aria-hidden="true" />
         {game && aiScreen && <Assistant rect={aiScreen} onBack={() => game.tabletHome()} />}
+        {game && lobby && <Lobby game={game} />}
       </div>
       {devOpen && game && <DevMenu game={game} onClose={() => setDevOpen(false)} />}
     </>

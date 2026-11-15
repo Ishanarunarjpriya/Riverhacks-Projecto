@@ -4,7 +4,7 @@ import { SHIP_SPOT } from './quests'
 import { setAssistantContext } from './assistant'
 import { GameAudio, type SoundName } from './audio'
 import { ANVIL_RECIPES, BEDS_PER_HOME, HOUSING_BEDS, KIT_STRUCTURES, PART_ITEMS, BASE_CENTER, BASE_HALF, BASE_RADIUS, FREE_PARTS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
-import { BLOCK, BLOCK_FOR_ITEM, BLOCK_INFO, BLOCK_REACH, MAX_STACK, cellCenter, cellOf, columnModel, ghostModel, type BlockColumn } from './blocks'
+import { BLOCK, BLOCK_FOR_ITEM, BLOCK_INFO, BLOCK_REACH, MAX_STACK, cellCenter, cellOf, columnModel, ghostModel, type BlockColumn, type BlockType } from './blocks'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
 import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, TERMINAL, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
 import {
@@ -42,11 +42,13 @@ import { drawHud, type Prompt } from './hud'
 import { Input } from './input'
 import { INVENTORY_SLOTS, InventoryScreen } from './inventory'
 import { FOOD, ITEMS, type ItemId } from './items'
-import { createRng, wrap, type CamPt } from './math'
+import { createRng, wrap, wrapPositive, type CamPt } from './math'
 import { box, ModelRenderer } from './model3d'
 import { PICKUP_RADIUS, drawPickup, type Pickup } from './pickups'
 import { fillPolygon, rect, type Ctx } from './pixel'
 import { NO_CONTROLS, Player } from './player'
+import { Net, type NetPlayer } from './net'
+import { adoptPickups, adoptStructures, adoptSurvivors, mergeCreatures as mergeCreatureLists, mergePickups, mergeSurvivors, unionIndices, unionStructures } from './coop'
 import { REGIONS, regionAt } from './regions'
 import { Sky } from './sky'
 import { INSPECTIONS, STRUCTURES, drawStructure, type Structure } from './structures'
@@ -61,12 +63,13 @@ import {
   nextJob,
   updateSurvivors,
   type Survivor,
+  type Job,
   FOOD_BIN,
   FOOD_DAY,
   STARVE_DAYS,
 } from './survivors'
 import { TextLayer } from './text'
-import { QuestTracker, type TrackerSnapshot } from './tracker'
+import { QuestTracker, type CountField, type TrackerSnapshot } from './tracker'
 import { boulderAt, craterAt, createWorld, groundHeightAt, type Boulder, type Crater, type World } from './world'
 
 type Decal =
@@ -77,11 +80,48 @@ type Decal =
   | { kind: 'garden'; pos: CamPos; radius: number; depth: number; farm: boolean }
   | { kind: 'plot'; pos: CamPos; radius: number; depth: number }
 
+interface Remote {
+  puppet: Player
+  name: string
+  color: string
+  scene: string
+  tx: number
+  tz: number
+  ty: number
+  heading: number
+  held: ItemId | null
+  armor: boolean
+  seen: number
+}
+
+/** What players send each other. 'op' messages are guest actions the host applies to the shared world. */
+type NetData =
+  | { k: 'pos'; x: number; z: number; y: number; h: number; s: string; held: ItemId | null; armor: boolean; g: boolean }
+  | { k: 'state'; s: SharedState }
+  | { k: 'init'; intro: boolean; s: SharedState; x: number; z: number }
+  | { k: 'op'; op: NetOp }
+
+type NetOp =
+  | { type: 'block-place'; scene: string; gx: number; gz: number; block: BlockType }
+  | { type: 'block-remove'; scene: string; gx: number; gz: number }
+  | { type: 'food'; meals: number }
+  | { type: 'supplies' }
+  | { type: 'job'; name: string; job: Job }
+  | { type: 'rocket-repair'; section: Blueprint }
+  | { type: 'repair'; name: string }
+  | { type: 'count'; field: CountField; item?: ItemId; amount?: number }
+
+interface SharedState {
+  tracker: Record<string, unknown>
+  world: Partial<SaveData>
+}
+
 type Upright =
   | { kind: 'boulder'; boulder: Boulder; p: ScreenPoint }
   | { kind: 'structure'; structure: Structure; p: ScreenPoint }
   | { kind: 'pickup'; pickup: Pickup; p: ScreenPoint }
   | { kind: 'player'; p: ScreenPoint; pos: CamPos }
+  | { kind: 'remote'; remote: Remote; p: ScreenPoint }
   | { kind: 'creature'; creature: Creature; p: ScreenPoint }
   | { kind: 'anomaly'; anomaly: Anomaly; p: ScreenPoint }
   | { kind: 'survivor'; survivor: Survivor; p: ScreenPoint }
@@ -264,7 +304,7 @@ export class Game {
   private rigs = new Map<string, { ice: number; timer: number }>()
   private lastStandTimer = 6
   private gameWon = false
-  private title = readSave() !== null
+  private title = true
   private saveTimer = AUTOSAVE_INTERVAL
   private savedFlash = 0
   private savedQuests = 0
@@ -300,9 +340,16 @@ export class Game {
   private foodTimer = FOOD_DAY
   private playStarted = false
   private pendingSupplies: Partial<Record<ItemId, number>> = {}
-  private labels: { x: number; y: number; name: string; job: string }[] = []
+  private labels: { x: number; y: number; name: string; job: string; color?: string }[] = []
   private interaction: Interaction | null = null
   private interactQueued = false
+  /** Multiplayer room connection; idle in single player. */
+  readonly net = new Net()
+  private lobbyOpen = false
+  private lobbyListeners = new Set<(open: boolean) => void>()
+  private remotes = new Map<number, Remote>()
+  private netPosTimer = 0
+  private netStateTimer = 0
   private time = 0
   private last = 0
   private raf = 0
@@ -361,6 +408,11 @@ export class Game {
 
     this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
     if (import.meta.env.DEV) Object.assign(window, { cosmos: { state: () => this.stateForAI(), game: this } })
+    this.net.onMessage = (from, data) => this.onNetMessage(from, data as NetData)
+    this.net.onStarted = () => this.onNetStarted()
+    this.net.onPlayers = (joined, left) => this.onNetPlayers(joined, left)
+    this.net.onClosed = (reason) => this.onNetClosed(reason)
+    this.tracker.onCount = (field, item, amount) => this.sendOp({ type: 'count', field, item, amount })
     setAssistantContext(() => this.assistantContext())
   }
 
@@ -432,6 +484,7 @@ export class Game {
     const type = BLOCK_FOR_ITEM[held]!
     if (!this.tracker.consume(held)) return
     this.world.blocks.place(target.gx, target.gz, type)
+    this.sendOp({ type: 'block-place', scene: this.scene, gx: target.gx, gz: target.gz, block: type })
     const [cx, cz] = cellCenter(target.gx, target.gz)
     this.spawnBurst(cx, cz, target.level * BLOCK + BLOCK, 6, BLOCK_INFO[type].top, 2)
     this.sound('build')
@@ -452,6 +505,7 @@ export class Game {
     if (!found) return
     const type = this.world.blocks.remove(found[0], found[1])
     if (!type) return
+    this.sendOp({ type: 'block-remove', scene: this.scene, gx: found[0], gz: found[1] })
     const [cx, cz] = cellCenter(found[0], found[1])
     this.spawnBurst(cx, cz, this.world.blocks.height(found[0], found[1]) + 1, 8, BLOCK_INFO[type].side, 3)
     this.tracker.refund(BLOCK_INFO[type].item)
@@ -574,6 +628,7 @@ export class Game {
       options.push({ title: `${ok ? '[E] ' : ''}REPAIR ROCKET ${BLUEPRINTS[d].name}`, detail: costText(cost), ok, run: ok ? () => {
         pay(cost)
         rocket.damaged.delete(d)
+        this.sendOp({ type: 'rocket-repair', section: d })
         tracker.repair(`ROCKET ${BLUEPRINTS[d].name}`)
       } : undefined })
     }
@@ -978,8 +1033,10 @@ export class Game {
 
   private handleMenuKey(code: string): boolean {
     if (this.title) {
+      if (this.lobbyOpen) return true
       if (code === 'Enter' || code === 'Space' || code === 'KeyE' || code === 'KeyC') this.continueGame()
-      else if (code === 'KeyN') this.newGame()
+      else if (code === 'KeyN' && readSave()) this.newGame()
+      else if (code === 'KeyM') this.openLobby()
       return true
     }
     if (!this.playing) return false
@@ -1455,17 +1512,23 @@ export class Game {
     ctx.arc(SCREEN_W / 2, SCREEN_H + 190, 220, 0, Math.PI * 2)
     ctx.fill()
     text.text('COSMOS REBORN', SCREEN_W / 2, 50, '#fac775', { size: 14, align: 'center' })
+    if (this.lobbyOpen) return
     const save = readSave()
-    const done = ((save?.tracker as Record<string, unknown> | undefined)?.completed as string[] | undefined)?.length ?? 0
-    const when = typeof save?.savedAt === 'number' ? new Date(save.savedAt).toLocaleString() : ''
     const blink = Math.floor(this.time * 2) % 2 === 0
-    text.text(`${blink ? '▶ ' : '  '}[ENTER] CONTINUE`, SCREEN_W / 2, 92, '#d9dcef', { size: 7, align: 'center' })
-    text.text(`${done} QUESTS DONE · SAVED ${when}`, SCREEN_W / 2, 103, '#5b6496', { size: 5, align: 'center' })
-    text.text('[N] NEW GAME (ERASES YOUR SAVE)', SCREEN_W / 2, 120, '#ff8a7a', { size: 6, align: 'center' })
+    if (save) {
+      const done = ((save.tracker as Record<string, unknown> | undefined)?.completed as string[] | undefined)?.length ?? 0
+      const when = typeof save.savedAt === 'number' ? new Date(save.savedAt).toLocaleString() : ''
+      text.text(`${blink ? '▶ ' : '  '}[ENTER] CONTINUE`, SCREEN_W / 2, 84, '#d9dcef', { size: 7, align: 'center' })
+      text.text(`${done} QUESTS DONE · SAVED ${when}`, SCREEN_W / 2, 95, '#5b6496', { size: 5, align: 'center' })
+      text.text('[N] NEW GAME (ERASES YOUR SAVE)', SCREEN_W / 2, 108, '#ff8a7a', { size: 6, align: 'center' })
+    } else {
+      text.text(`${blink ? '▶ ' : '  '}[ENTER] START`, SCREEN_W / 2, 92, '#d9dcef', { size: 7, align: 'center' })
+    }
+    text.text('[M] MULTIPLAYER', SCREEN_W / 2, 122, '#5dcaa5', { size: 6.5, align: 'center' })
   }
 
   private saveGame(): boolean {
-    if (this.saveDisabled || this.title || !this.playStarted || this.finale) return false
+    if (this.saveDisabled || this.title || !this.playStarted || this.finale || this.net.isGuest) return false
     const P = this.player
     const inArena = this.scene === 'arena'
     const parts: Record<string, { x: number; z: number; yaw?: number; damaged?: boolean }> = {}
@@ -1598,9 +1661,309 @@ export class Game {
     this.audio.play(name)
   }
 
+
+  // ── Multiplayer ──────────────────────────────────────────────────────────
+
+  subscribeLobby(listener: (open: boolean) => void): () => void {
+    this.lobbyListeners.add(listener)
+    listener(this.lobbyOpen)
+    return () => {
+      this.lobbyListeners.delete(listener)
+    }
+  }
+
+  private setLobby(open: boolean): void {
+    this.lobbyOpen = open
+    for (const fn of this.lobbyListeners) fn(open)
+  }
+
+  openLobby(): void {
+    if (!this.title) return
+    this.setLobby(true)
+  }
+
+  closeLobby(): void {
+    this.net.leave()
+    this.setLobby(false)
+  }
+
+  /** Host pressed START in the lobby: begin (or continue) the shared game and bring everyone in. */
+  hostStart(fresh: boolean): void {
+    if (!this.net.isHost) return
+    this.setLobby(false)
+    fresh = fresh || !readSave()
+    if (fresh) this.newGame()
+    else this.continueGame()
+    this.net.start()
+    const init: NetData = { k: 'init', intro: fresh, s: this.sharedState(), x: this.player.x, z: this.player.z }
+    this.net.send(init)
+    this.cutscene.setCrew(this.net.players.length)
+  }
+
+  private onNetStarted(): void {
+    // Guests wait for the host's 'init' with the world; nothing to do until then.
+    if (this.net.isHost) return
+    this.setLobby(false)
+  }
+
+  private onNetPlayers(joined: NetPlayer[], left: NetPlayer[]): void {
+    for (const p of left) {
+      this.remotes.delete(p.id)
+      if (!this.title) this.tracker.toastMessage(`${p.name} LEFT THE GAME`, '#9aa2cf')
+    }
+    for (const p of joined) {
+      if (p.id === this.net.you) continue
+      if (!this.title) this.tracker.toastMessage(`${p.name} JOINED THE GAME`, p.color)
+      // Late joiners get the world straight away and drop in next to the host.
+      if (this.net.isHost && this.net.status === 'playing' && !this.title) {
+        const init: NetData = { k: 'init', intro: false, s: this.sharedState(), x: this.player.x, z: this.player.z }
+        this.net.send(init, p.id)
+      }
+    }
+  }
+
+  private onNetClosed(reason: string): void {
+    this.remotes.clear()
+    if (this.title) {
+      this.setLobby(true)
+      return
+    }
+    this.tracker.toastMessage(`${reason}. YOU ARE PLAYING ALONE NOW (YOUR OWN SAVE IS UNTOUCHED).`, '#ff8a7a')
+  }
+
+  private onNetMessage(from: number, data: NetData): void {
+    if (!data || typeof data !== 'object') return
+    if (data.k === 'pos') {
+      let r = this.remotes.get(from)
+      if (!r) {
+        const puppet = new Player()
+        puppet.x = data.x
+        puppet.z = data.z
+        r = { puppet, name: this.net.nameOf(from), color: this.net.colorOf(from), scene: data.s, tx: data.x, tz: data.z, ty: data.y, heading: data.h, held: data.held, armor: data.armor, seen: this.time }
+        this.remotes.set(from, r)
+      }
+      r.tx = data.x
+      r.tz = data.z
+      r.ty = data.y
+      r.heading = data.h
+      r.scene = data.s
+      r.held = data.held
+      r.armor = data.armor
+      r.puppet.grounded = data.g
+      r.seen = this.time
+      r.name = this.net.nameOf(from)
+      r.color = this.net.colorOf(from)
+      return
+    }
+    if (data.k === 'init' && !this.net.isHost) {
+      this.joinShared(data)
+      return
+    }
+    if (data.k === 'state') {
+      const fromHost = from === this.net.hostId
+      if (this.net.isHost && !fromHost) this.mergeShared(data.s, false)
+      else if (!this.net.isHost && fromHost) this.mergeShared(data.s, true)
+      return
+    }
+    if (data.k === 'op' && this.net.isHost) this.applyOp(data.op)
+  }
+
+  private joinShared(data: Extract<NetData, { k: 'init' }>): void {
+    this.setLobby(false)
+    this.title = false
+    const index = Math.max(1, this.net.players.findIndex((p) => p.id === this.net.you))
+    if (data.intro) {
+      // Everyone watches the crash together, then walks out side by side.
+      this.cutscene = new Cutscene('intro')
+      this.cutscene.setCrew(this.net.players.length)
+      this.player.x = index * 2.2
+      this.player.z = 0
+      this.mergeShared(data.s, true)
+      return
+    }
+    this.cutscene.skip()
+    this.playStarted = true
+    this.tracker.start()
+    this.mergeShared(data.s, true)
+    // Prior cutscenes count as seen when dropping into a game in progress.
+    this.earthPlayed = true
+    this.act2Played = this.tracker.completed.includes('act2.new-community')
+    this.scene = 'surface'
+    this.player.x = data.x + Math.cos(index) * 3
+    this.player.z = data.z + Math.sin(index) * 3
+    this.camera.follow(this.player.x, this.player.z, this.player.heading, 1)
+    this.tracker.toastMessage(`YOU JOINED ${this.net.nameOf(this.net.hostId)}'S GAME`, '#5dcaa5')
+  }
+
+  private sendOp(op: NetOp): void {
+    if (this.net.isGuest) this.net.send({ k: 'op', op } satisfies NetData, 'host')
+  }
+
+  private worldFor(scene: string): World | null {
+    return scene === 'surface' ? this.surface : scene === 'cave' ? this.caveWorld : null
+  }
+
+  private applyOp(op: NetOp): void {
+    switch (op.type) {
+      case 'block-place':
+        this.worldFor(op.scene)?.blocks.place(op.gx, op.gz, op.block)
+        break
+      case 'block-remove':
+        this.worldFor(op.scene)?.blocks.remove(op.gx, op.gz)
+        break
+      case 'food':
+        this.foodBin += Math.max(0, Math.min(200, op.meals))
+        for (const s of this.eaters()) if (s.hunger) s.hunger = 0
+        break
+      case 'supplies':
+        this.pendingSupplies = {}
+        break
+      case 'job': {
+        const s = this.survivors.find((v) => v.name === op.name)
+        if (s) s.job = op.job
+        this.tracker.jobs[op.name] = op.job
+        break
+      }
+      case 'rocket-repair':
+        rocket.damaged.delete(op.section)
+        break
+      case 'repair': {
+        const st = this.surface.structures.find((v) => v.name === op.name)
+        if (st) st.damaged = false
+        break
+      }
+      case 'count':
+        this.tracker.addCount(op.field, op.item, op.amount)
+        break
+    }
+  }
+
+  private sharedState(): SharedState {
+    const parts: Record<string, { x: number; z: number; yaw?: number; damaged?: boolean }> = {}
+    for (const [key, st] of Object.entries(PART_STRUCTURES)) if (st) parts[key] = { x: st.x, z: st.z, yaw: st.yaw, damaged: st.damaged }
+    return {
+      tracker: this.tracker.sharedSave(),
+      world: {
+        flags: { aftermathDone: this.aftermathDone, dropshipAdded: this.dropshipAdded, dropshipSearched: this.dropshipSearched, gameWon: this.gameWon },
+        pendingSupplies: this.pendingSupplies,
+        foodBin: this.foodBin,
+        foodTimer: this.foodTimer,
+        raidTimer: this.raidTimer,
+        parts,
+        surface: {
+          structures: this.surface.structures,
+          pickups: this.surface.pickups,
+          broken: this.surface.boulders.flatMap((b, i) => (b.broken ? [i] : [])),
+          ice: this.surface.craters.map((c) => c.iceLeft ?? null),
+          gardens: this.surface.gardens,
+          blocks: this.surface.blocks.toSave(),
+        },
+        cave: { pickups: this.caveWorld.pickups, broken: this.caveWorld.boulders.flatMap((b, i) => (b.broken ? [i] : [])), blocks: this.caveWorld.blocks.toSave() },
+        ship: { pickups: this.shipWorld.pickups },
+        survivors: this.survivors,
+        creatures: this.creatures,
+        rigs: [...this.rigs.entries()],
+        rocket: { placed: rocket.placed, x: rocket.x, z: rocket.z, built: [...rocket.built], damaged: [...rocket.damaged], bay: rocket.bay, food: rocket.food, fuel: rocket.fuel },
+      },
+    }
+  }
+
+  /** fromHost: we are a guest taking the host's world. Otherwise we are the host taking a guest's progress. */
+  private mergeShared(state: SharedState, fromHost: boolean): void {
+    if (!state) return
+    this.tracker.mergeShared(state.tracker ?? {}, fromHost)
+    const w = state.world ?? {}
+    const partsByName = new Map(Object.values(PART_STRUCTURES).filter((p): p is Structure => !!p).map((p) => [p.name, p]))
+    const f = w.flags ?? {}
+    this.aftermathDone ||= !!f.aftermathDone
+    this.dropshipAdded ||= !!f.dropshipAdded
+    this.dropshipSearched ||= !!f.dropshipSearched
+    this.gameWon ||= !!f.gameWon
+    const ws = w.surface ?? {}
+    for (const i of unionIndices([], ws.broken)) if (this.surface.boulders[i]) this.surface.boulders[i].broken = true
+    for (const i of unionIndices([], w.cave?.broken)) if (this.caveWorld.boulders[i]) this.caveWorld.boulders[i].broken = true
+    ;(ws.ice ?? []).forEach((left, i) => {
+      const c = this.surface.craters[i]
+      if (c && c.ice && left !== null) c.iceLeft = Math.min(c.iceLeft ?? left, left)
+    })
+    if (Array.isArray(w.rigs)) for (const [k, v] of w.rigs) if (!this.rigs.has(k)) this.rigs.set(k, v)
+    const rk = w.rocket
+    if (rk) {
+      if (rk.placed && !rocket.placed) {
+        rocket.placed = true
+        rocket.x = rk.x ?? rocket.x
+        rocket.z = rk.z ?? rocket.z
+      }
+      for (const b of rk.built ?? []) rocket.built.add(b)
+      rocket.bay ||= !!rk.bay
+      rocket.food = Math.max(rocket.food, rk.food ?? 0)
+      rocket.fuel = Math.max(rocket.fuel, rk.fuel ?? 0)
+    }
+
+    if (fromHost) {
+      for (const [key, saved] of Object.entries(w.parts ?? {})) {
+        const st = PART_STRUCTURES[key as BasePart]
+        if (st) Object.assign(st, saved)
+      }
+      this.surface.structures = adoptStructures(this.surface.structures, ws.structures, partsByName)
+      this.surface.pickups = adoptPickups(this.surface.pickups, ws.pickups, this.dragging)
+      this.caveWorld.pickups = adoptPickups(this.caveWorld.pickups, w.cave?.pickups, null)
+      this.shipWorld.pickups = adoptPickups(this.shipWorld.pickups, w.ship?.pickups, null)
+      if (Array.isArray(ws.gardens)) this.surface.gardens = ws.gardens
+      if (Array.isArray(ws.blocks)) this.surface.blocks.loadSave(ws.blocks)
+      if (Array.isArray(w.cave?.blocks)) this.caveWorld.blocks.loadSave(w.cave.blocks)
+      this.survivors = adoptSurvivors(this.survivors, w.survivors)
+      this.creatures = mergeCreatureLists(this.creatures, w.creatures, true)
+      if (rk) rocket.damaged = new Set(rk.damaged ?? [])
+      this.pendingSupplies = w.pendingSupplies ?? {}
+      this.foodBin = w.foodBin ?? this.foodBin
+      this.foodTimer = w.foodTimer ?? this.foodTimer
+      this.raidTimer = w.raidTimer ?? this.raidTimer
+    } else {
+      unionStructures(this.surface.structures, ws.structures, partsByName)
+      mergePickups(this.surface.pickups, ws.pickups, !this.dragging)
+      mergePickups(this.caveWorld.pickups, w.cave?.pickups, false)
+      mergePickups(this.shipWorld.pickups, w.ship?.pickups, false)
+      mergeSurvivors(this.survivors, w.survivors)
+      mergeCreatureLists(this.creatures, w.creatures, false)
+    }
+  }
+
+  private updateNet(dt: number): void {
+    const net = this.net
+    for (const r of this.remotes.values()) {
+      const p = r.puppet
+      const k = Math.min(1, dt * 12)
+      const dx = wrap(r.tx - p.x)
+      const dz = wrap(r.tz - p.z)
+      const far = Math.hypot(dx, dz) > 20
+      p.x = far ? r.tx : wrapPositive(p.x + dx * k)
+      p.z = far ? r.tz : wrapPositive(p.z + dz * k)
+      p.y += (r.ty - p.y) * k
+      p.heading = r.heading
+      p.moving = Math.hypot(dx, dz) > 0.08
+      if (p.moving) p.walkTime += dt
+    }
+    if (net.status !== 'playing') return
+    this.netPosTimer -= dt
+    if (this.netPosTimer <= 0) {
+      this.netPosTimer = 0.1
+      const P = this.player
+      net.send({ k: 'pos', x: P.x, z: P.z, y: P.y, h: P.heading, s: this.scene, held: this.heldItem(), armor: this.tracker.hasItem('armor-plating'), g: P.grounded } satisfies NetData)
+    }
+    this.netStateTimer -= dt
+    if (this.netStateTimer <= 0 && this.playStarted) {
+      this.netStateTimer = net.isHost ? 0.8 : 1
+      const msg: NetData = { k: 'state', s: this.sharedState() }
+      if (net.isHost) net.send(msg)
+      else net.send(msg, 'host')
+    }
+  }
+
   private update(dt: number): void {
     this.audio.update(dt)
     if (this.title) return
+    this.updateNet(dt)
     if (!this.cutscene.done) {
       this.cutscene.update(dt, this.audio)
       if (this.cutscene.done) this.input.clear()
@@ -1847,6 +2210,7 @@ export class Game {
   }
 
   private updateProduction(dt: number): void {
+    if (this.net.isGuest) return
     this.updateHunger(dt)
     const working = this.survivors.filter((s) => s.job && !(s.hunger ?? 0))
     if (working.length > 0) {
@@ -1950,6 +2314,7 @@ export class Game {
           for (let i = 0; i < n; i++) tracker.consume(item)
         }
         this.foodBin += meals
+        this.sendOp({ type: 'food', meals })
         for (const s of this.eaters()) if (s.hunger) s.hunger = 0
         tracker.toastMessage(`FOOD BIN: ${this.foodBin} MEALS`, '#7fcf6a')
         this.sound('select')
@@ -2625,6 +2990,7 @@ export class Game {
           run: () => {
             survivor.job = next
             tracker.assignJob(survivor.name, next)
+            this.sendOp({ type: 'job', name: survivor.name, job: next })
           },
         }
       })
@@ -2640,6 +3006,7 @@ export class Game {
         run: () => {
           const items = this.pendingSupplies
           this.pendingSupplies = {}
+          this.sendOp({ type: 'supplies' })
           tracker.collectSupplies(items)
         },
       }))
@@ -2684,6 +3051,7 @@ export class Game {
                   tracker.consume('metal-scrap')
                   tracker.consume('metal-scrap')
                   s.damaged = false
+                  this.sendOp({ type: 'repair', name: s.name })
                   tracker.repair(s.name)
                 }
               : undefined,
@@ -3189,6 +3557,12 @@ export class Game {
       }
     }
     this.labels = []
+    for (const remote of this.remotes.values()) {
+      if (remote.scene !== this.scene) continue
+      const pos = cam.toCamera(remote.puppet.x, remote.puppet.z)
+      const p = cam.projectPoint(pos.rx, pos.rz)
+      if (p && p.sx > -20 && p.sx < SCREEN_W + 20) uprights.push({ kind: 'remote', remote, p })
+    }
     const playerPos = cam.toCamera(player.x, player.z)
     const playerP = cam.projectPoint(playerPos.rx, playerPos.rz)
     if (playerP) {
@@ -3221,6 +3595,7 @@ export class Game {
         this.model.draw(ctx, ghostModel(Math.min(u.target.level, MAX_STACK - 1), u.target.ok))
         ctx.globalAlpha = 1
       }
+      else if (u.kind === 'remote') this.drawRemote(u.remote, u.p)
       else this.drawPlayer(u.p, u.pos)
       if (u.kind === 'pickup' && u.pickup.item === 'rare-ore') this.glows.push({ x: u.p.sx, y: u.p.sy - u.p.scale, color: '#ffd28a' })
       if (u.kind === 'structure' && (u.structure.kind === 'cavern' || u.structure.kind === 'ladder')) {
@@ -3244,7 +3619,7 @@ export class Game {
         // Behind you or off to the side: an arrow on the screen edge.
         const right = c.rx > 0 || (c.rz < 0 && c.rx === 0)
         const x = right ? SCREEN_W - 8 : 8
-        const y = 72 + Math.sin(this.time * 4) * 2
+        const y = 140 + Math.sin(this.time * 4) * 2
         ctx.fillStyle = '#16182c'
         ctx.beginPath()
         ctx.moveTo(right ? x + 5 : x - 5, y)
@@ -3257,7 +3632,7 @@ export class Game {
         ctx.lineTo(right ? x - 2 : x + 2, y - 4.5)
         ctx.lineTo(right ? x - 2 : x + 2, y + 4.5)
         ctx.fill()
-        this.markerScreen = { x: right ? SCREEN_W - 30 : 30, y: y + 8 }
+        this.markerScreen = { x: right ? SCREEN_W - 30 : 30, y: y - 14 }
       } else if (sp) {
         const far = !cam.projectPoint(c.rx, c.rz)
         const bob = Math.sin(this.time * 3) * 2
@@ -3368,10 +3743,14 @@ export class Game {
       this.text.text('SAVED', SCREEN_W - 6, SCREEN_H - 16, '#5dcaa5', { size: 4.5, align: 'right' })
       this.text.alpha = 1
     }
+    if (this.net.status === 'playing' && !this.tablet.visible) {
+      const n = this.net.players.length
+      this.text.text(`ROOM ${this.net.code} · ${n} PLAYER${n === 1 ? '' : 'S'}`, SCREEN_W - 6, SCREEN_H - 9, '#5dcaa5', { size: 4.2, align: 'right' })
+    }
     for (const l of this.labels) {
       const w = Math.max(this.text.measure(l.name, { size: 4.8 }), l.job ? this.text.measure(l.job, { size: 4, weight: 500 }) : 0) + 6
       this.text.rect('rgba(6,5,24,0.72)', l.x - w / 2, l.y - 1, w, l.job ? 11.5 : 6.5)
-      this.text.text(l.name, l.x, l.y, '#fac775', { size: 4.8, align: 'center' })
+      this.text.text(l.name, l.x, l.y, l.color ?? '#fac775', { size: 4.8, align: 'center' })
       if (l.job) this.text.text(l.job, l.x, l.y + 5.5, '#e8ecff', { size: 4, align: 'center', weight: 500 })
     }
     this.text.alpha = 1
@@ -3463,6 +3842,16 @@ export class Game {
       if (!s) continue
       rect(ctx, p.color, s.sx, s.sy - p.y * s.scale, p.life > 0.3 ? 2 : 1, 1)
     }
+  }
+
+  private drawRemote(r: Remote, p: ScreenPoint): void {
+    const { ctx } = this
+    const held = r.held
+    r.puppet.draw(ctx, p.sx, p.sy, p.scale, false, { armor: r.armor, blaster: held === 'blaster', pickaxe: 0, held, heldIcon: held && HAS_ITEM_PNG.has(held) ? ICONS[held] : null })
+    // A coloured band on the suit tells crewmates apart.
+    const fy = Math.round(p.sy - r.puppet.y * p.scale)
+    rect(ctx, r.color, p.sx - 4, fy - 9, 8, 2)
+    if (p.depth < 60) this.labels.push({ x: p.sx, y: fy - 22, name: r.name, job: '', color: r.color })
   }
 
   private drawPlayer(p: ScreenPoint, pos: CamPos): void {

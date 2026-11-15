@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { answerAssist } from './server/assist.js'
 import { speak } from './server/tts.js'
+import { attachRooms } from './server/rooms.js'
 
 /**
  * Production host for Cosmos Reborn: serves the built game from dist/ and the
@@ -113,6 +114,8 @@ const server = createServer(async (req, res) => {
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
   res.end('dist/ is missing. Run `npm run build` first.')
 })
+
+attachRooms(server)
 
 server.listen(PORT, () => {
   const mode = API_KEY ? 'MOONLINK online' : 'MOONLINK offline (SERPAPI_KEY not set)'

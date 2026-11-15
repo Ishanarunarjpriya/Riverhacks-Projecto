@@ -1,3 +1,4 @@
+import { attachRooms } from './server/rooms.js'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 import { answerAssist } from './server/assist.js'
@@ -46,9 +47,11 @@ function geminiAssistant(env) {
     name: 'gemini-assistant',
     configureServer(server) {
       server.middlewares.use(middleware)
+      if (server.httpServer) attachRooms(server.httpServer)
     },
     configurePreviewServer(server) {
       server.middlewares.use(middleware)
+      if (server.httpServer) attachRooms(server.httpServer)
     },
   }
 }
