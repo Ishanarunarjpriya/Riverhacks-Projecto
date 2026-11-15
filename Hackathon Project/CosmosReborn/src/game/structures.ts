@@ -78,10 +78,11 @@ export const INSPECTIONS: Partial<Record<StructureKind, Inspection>> = {
   },
 }
 
-const ROLL: Partial<Record<StructureKind, number>> = { lander: 0.16, satellite: -0.28 }
+const ROLL: Partial<Record<StructureKind, number>> = { lander: -0.13, satellite: -0.28 }
+const LIFT: Partial<Record<StructureKind, number>> = { lander: -0.5 }
 
 export function drawStructure(ctx: Ctx, model: ModelRenderer, s: Structure, scale: number, time: number): void {
-  model.begin({ x: s.x, z: s.z, yaw: s.yaw ?? 0, roll: ROLL[s.kind] })
+  model.begin({ x: s.x, z: s.z, yaw: s.yaw ?? 0, roll: ROLL[s.kind], lift: LIFT[s.kind] })
   model.draw(ctx, buildModel(s.kind, time))
   drawEffects(ctx, model, s.kind, scale, time)
 }
@@ -91,11 +92,13 @@ function buildModel(kind: StructureKind, time: number): Part[] {
   switch (kind) {
     case 'lander':
       return [
-        box(-4.3, -3.8, 0, 2.8, -4.3, -3.8, '#c9cbe0'),
-        box(3.8, 4.3, 0, 1.6, -4.3, -3.8, '#c9cbe0'),
-        box(-4.3, -3.8, 0, 2.8, 3.8, 4.3, '#c9cbe0'),
-        box(3.8, 4.3, 0, 2.8, 3.8, 4.3, '#c9cbe0'),
+        ...landerLeg(-1, -1),
+        ...landerLeg(-1, 1),
+        ...landerLeg(1, 1),
+        ...strut([3.1, 2.6, -3.1], [3.9, 1.3, -3.9], 0.5, '#c9cbe0'),
+        box(5.3, 6.5, 0, 0.25, -5.9, -4.7, '#9aa0b8', '#c9cbe0'),
         box(-3.6, 3.6, 2.4, 6.4, -3.6, 3.6, '#d4a43c', '#f2c85e'),
+        box(-3.2, 3.2, 2.15, 2.4, -3.2, 3.2, '#9aa0b8'),
         box(1, 3.4, 3, 5.4, 3.6, 3.7, '#3b2f2a'),
         box(-1.2, 1, 3.2, 4.8, -3.7, -3.6, '#2a2238'),
         box(-2.3, 2.3, 6.4, 8.8, -2.3, 2.3, '#e6e6ee'),
@@ -272,6 +275,40 @@ function buildModel(kind: StructureKind, time: number): Part[] {
         glowBox(1.8, 2.4, 1.6, 1.75, 1, 1.5, blink ? '#5dcaa5' : '#1d5c4a'),
       ]
   }
+}
+
+function strut(a: V3, b: V3, width: number, color: string): Part[] {
+  const d: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+  const len = Math.hypot(...d) || 1
+  const dir: V3 = [d[0] / len, d[1] / len, d[2] / len]
+  const ref: V3 = Math.abs(dir[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]
+  const norm = (v: V3): V3 => {
+    const l = Math.hypot(...v) || 1
+    return [v[0] / l, v[1] / l, v[2] / l]
+  }
+  const cross = (x: V3, y: V3): V3 => [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]]
+  const u = norm(cross(dir, ref))
+  const v = norm(cross(dir, u))
+  const quad = (o: V3): V3[] => {
+    const h = width / 2
+    return [
+      [a[0] + o[0] * h, a[1] + o[1] * h, a[2] + o[2] * h],
+      [a[0] - o[0] * h, a[1] - o[1] * h, a[2] - o[2] * h],
+      [b[0] - o[0] * h, b[1] - o[1] * h, b[2] - o[2] * h],
+      [b[0] + o[0] * h, b[1] + o[1] * h, b[2] + o[2] * h],
+    ]
+  }
+  return [panel(quad(u), color, color), panel(quad(v), color, color)]
+}
+
+function landerLeg(sx: number, sz: number): Part[] {
+  const fx = sx * 4.7
+  const fz = sz * 4.7
+  return [
+    ...strut([sx * 3.1, 2.6, sz * 3.1], [fx, 0.3, fz], 0.5, '#c9cbe0'),
+    ...strut([sx * 3.4, 3.6, sz * 1.6], [fx, 0.3, fz], 0.3, '#9aa0b8'),
+    box(fx - 0.7, fx + 0.7, 0, 0.3, fz - 0.7, fz + 0.7, '#9aa0b8', '#c9cbe0'),
+  ]
 }
 
 function lift(part: Part, dy: number): Part {

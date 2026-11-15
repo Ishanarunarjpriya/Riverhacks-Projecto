@@ -2,7 +2,9 @@ import { BASE_CENTER, BASE_RADIUS, PART_ITEMS, RECIPES, costEntries, type BasePa
 import { ITEMS, type ItemId } from './items'
 import { wrap } from './math'
 import { ACT_TITLES, QUESTS, type Objective, type Quest } from './quests'
-import type { Region } from './regions'
+import { ANOMALIES } from './anomalies'
+import { REGIONS, type Region } from './regions'
+import { STRUCTURES } from './structures'
 import type { Job } from './survivors'
 
 export type MessageKind = 'toast' | 'complete' | 'quest' | 'act' | 'transmission'
@@ -364,6 +366,126 @@ export class QuestTracker {
       rocketProgress: 0,
       enemyWavesSurvived: 0,
       act4Choice: null,
+    }
+  }
+
+  devCompleteActive(onBuild: (part: BasePart) => void): string | null {
+    const quest = this.activeQuest
+    if (!quest) return null
+    for (const o of quest.objectives) this.devSatisfy(quest, o, onBuild)
+    this.check()
+    return quest.title
+  }
+
+  devJumpToAct(act: number, onBuild: (part: BasePart) => void): void {
+    for (let guard = 0; guard < 40; guard++) {
+      const quest = this.activeQuest
+      if (!quest || quest.act >= act) break
+      this.devCompleteActive(onBuild)
+    }
+    this.messages = []
+    this.pendingSounds = []
+    const quest = this.activeQuest
+    if (quest) {
+      this.say('act', `ACT ${roman(quest.act)}`, ACT_TITLES[quest.act] ?? '', '#fac775', 0.2)
+      this.announce(quest, 3.2)
+    }
+  }
+
+  devGive(items: Partial<Record<ItemId, number>>): void {
+    for (const [item, n] of Object.entries(items) as [ItemId, number][]) this.add(item, n)
+  }
+
+  devRevealAll(): void {
+    for (const s of STRUCTURES) if (s.discoverable && !this.explored.includes(s.name)) this.explored.push(s.name)
+    for (const r of REGIONS) if (!r.home && !this.regions.includes(r.id)) this.regions.push(r.id)
+    this.signalRevealed = true
+    this.check()
+  }
+
+  private devSatisfy(quest: Quest, o: Objective, onBuild: (part: BasePart) => void): void {
+    const fill = (list: string[], pool: string[], count: number) => {
+      for (const id of pool) if (list.length < count && !list.includes(id)) list.push(id)
+      for (let i = 0; list.length < count; i++) list.push(`dev-${i}`)
+    }
+    switch (o.kind) {
+      case 'collect': {
+        const need = o.count - (this.collected[o.item] ?? 0)
+        if (need > 0) {
+          this.collected[o.item] = o.count
+          this.add(o.item, need)
+        }
+        break
+      }
+      case 'collect-any':
+        for (const item of o.items.slice(0, o.count)) {
+          if ((this.collected[item] ?? 0) < 1) {
+            this.collected[item] = 1
+            this.add(item, 1)
+          }
+        }
+        break
+      case 'build':
+        if (!this.baseParts.has(o.part)) {
+          this.baseParts.add(o.part)
+          const item = PART_ITEMS[o.part]
+          if (item) this.add(item, 1)
+          onBuild(o.part)
+        }
+        break
+      case 'mine':
+        this.mined = Math.max(this.mined, o.count)
+        break
+      case 'discover':
+        fill(this.explored, STRUCTURES.filter((s) => s.discoverable).map((s) => s.name), o.count)
+        break
+      case 'inspect':
+        for (const name of this.explored) if (this.inspected.length < o.count && !this.inspected.includes(name)) this.inspected.push(name)
+        break
+      case 'return-to-base':
+        this.returnedToBase.add(quest.id)
+        break
+      case 'clue':
+        fill(this.clues, ['suit-log', 'hab-log', 'signal'], o.count)
+        break
+      case 'region':
+        fill(this.regions, REGIONS.filter((r) => !r.home).map((r) => r.id), o.count)
+        break
+      case 'scan':
+        fill(this.scans, ['0', '1', '2', '3'], o.count)
+        break
+      case 'anomaly':
+        fill(this.anomalies, ANOMALIES.map((a) => a.id), o.count)
+        this.signalRevealed = true
+        break
+      case 'signal':
+        this.signalRevealed = true
+        this.signalFound = true
+        break
+      case 'talk':
+        fill(this.talked, ['MAYA', 'OKORO', 'LENA'], o.count)
+        break
+      case 'assign':
+        for (const name of ['MAYA', 'OKORO', 'LENA'].slice(0, o.count)) this.jobs[name] = this.jobs[name] ?? 'GATHERER'
+        break
+      case 'supplies':
+        this.suppliesCollected = Math.max(this.suppliesCollected, o.count)
+        break
+      case 'cave':
+        this.caveReached = true
+        break
+      case 'defeat':
+        this.defeated = Math.max(this.defeated, o.count)
+        break
+      case 'search-suit':
+        this.suitSearched = true
+        break
+      case 'wave':
+        this.waveSurvived = true
+        break
+      case 'cavern':
+        this.cavernFound = true
+        break
     }
   }
 

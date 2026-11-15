@@ -1,6 +1,6 @@
 import { HATCH } from './anomalies'
 import { BASE_CENTER } from './base'
-import { SCREEN_CX, SCREEN_W, SHOW_MINIMAP, WORLD_SIZE } from './constants'
+import { SCREEN_CX, SCREEN_W, WORLD_SIZE } from './constants'
 import { HOTBAR_X, HOTBAR_Y, Hotbar, type HotbarItem } from './hotbar'
 import { clamp, wrap, wrapPositive } from './math'
 import { rect, type Ctx } from './pixel'
@@ -37,6 +37,7 @@ export interface HudState {
   prompt: Prompt | null
   muted: boolean
   combat: CombatHud
+  showMinimap: boolean
 }
 
 const PANEL = 'rgba(6,5,24,.75)'
@@ -45,7 +46,7 @@ const LINE = 8
 export function drawHud(ctx: Ctx, text: TextLayer, hud: HudState): void {
   drawQuestPanel(ctx, text, hud.tracker)
   drawCompass(ctx, text, hud.world, hud.player, hud.tracker)
-  if (SHOW_MINIMAP) drawMinimap(ctx, hud.world, hud.player)
+  if (hud.showMinimap) drawMinimap(ctx, hud.world, hud.player)
   drawToasts(ctx, text, hud.tracker)
   if (hud.prompt) drawPrompt(ctx, text, hud.prompt)
   if (hud.showPitWarning && Math.floor(hud.time * 3) % 2) {

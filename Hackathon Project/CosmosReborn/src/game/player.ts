@@ -48,6 +48,7 @@ export class Player {
   turn = 0
   jumpCooldown = 0
   actionTime = 0
+  speedMult = 1
   events: PlayerEvent[] = []
 
   private stepTimer = 0
@@ -59,8 +60,8 @@ export class Player {
     this.jumpCooldown = Math.max(0, this.jumpCooldown - dt)
     this.actionTime = Math.max(0, this.actionTime - dt)
 
-    const target = controls.forward * WALK_SPEED
-    const accel = WALK_ACCEL * dt
+    const target = controls.forward * WALK_SPEED * this.speedMult
+    const accel = WALK_ACCEL * this.speedMult * dt
     this.speed += Math.max(-accel, Math.min(accel, target - this.speed))
     if (controls.forward === 0 && Math.abs(this.speed) < 0.5) this.speed = 0
 

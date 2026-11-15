@@ -1,8 +1,8 @@
 import { ANOMALIES, ANOMALY_RANGE, HATCH, HATCH_RANGE, drawAnomaly, type Anomaly } from './anomalies'
 import { GameAudio, type SoundName } from './audio'
-import { BASE_CENTER, BASE_HALF, BASE_RADIUS, PART_STRUCTURES, RECIPES, costEntries } from './base'
+import { BASE_CENTER, BASE_HALF, BASE_RADIUS, PART_STRUCTURES, RECIPES, costEntries, type BasePart } from './base'
 import { Camera, horizonY, ring, type CamPos, type ScreenPoint } from './camera'
-import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
+import { CAVERN, CAVERN_RANGE, CAVE_GROUND, CAVE_SPAWN, LADDER, createCaveWorld, drawCaveCeiling, drawDarkness } from './cave'
 import {
   ARMOR_REDUCTION,
   BLASTER_COOLDOWN,
@@ -22,7 +22,7 @@ import {
   type Projectile,
   type Wreck,
 } from './combat'
-import { HORIZON_D, SCREEN_H, SCREEN_W } from './constants'
+import { HORIZON_D, SCREEN_H, SCREEN_W, SHOW_MINIMAP } from './constants'
 import { drawCrater } from './crater'
 import { SCAN_RANGE, createCreatures, drawCreature, speciesNote, updateCreatures, type Creature } from './creatures'
 import { Cutscene } from './cutscene'
@@ -36,9 +36,9 @@ import { box, ModelRenderer } from './model3d'
 import { PICKUP_RADIUS, drawPickup, type Pickup } from './pickups'
 import { fillPolygon, rect, type Ctx } from './pixel'
 import { NO_CONTROLS, Player } from './player'
-import { regionAt } from './regions'
+import { REGIONS, regionAt } from './regions'
 import { Sky } from './sky'
-import { INSPECTIONS, drawStructure, type Structure } from './structures'
+import { INSPECTIONS, STRUCTURES, drawStructure, type Structure } from './structures'
 import { Tablet, type TabletView } from './tablet'
 import {
   JOB_OUTPUT,
@@ -84,6 +84,33 @@ interface Particle {
   vy: number
   life: number
   color: string
+}
+
+export interface DevLocation {
+  id: string
+  label: string
+  group: string
+  scene: 'surface' | 'cave'
+  x: number
+  z: number
+  face: number
+}
+
+export interface DevStatus {
+  fps: number
+  scene: string
+  x: number
+  z: number
+  y: number
+  heading: number
+  region: string
+  quest: string
+  act: number
+  hp: number
+  enemies: number
+  god: boolean
+  speed: number
+  minimap: boolean
 }
 
 export interface NearbyResource {
@@ -135,6 +162,9 @@ export class Game {
   private wave = { started: false, active: false, integrity: 100, restartTimer: 0 }
   private fade = 0
   private glows: { x: number; y: number; color: string }[] = []
+  private devGod = false
+  private showMinimap = SHOW_MINIMAP
+  private fps = 60
   private sky = new Sky()
   private camera = new Camera()
   private player = new Player()
@@ -267,6 +297,139 @@ export class Game {
     return { world: this.surface, playerX: this.player.x, playerZ: this.player.z, heading: this.player.heading, tracker: this.tracker, underground: !this.onSurface }
   }
 
+  devLocations(): DevLocation[] {
+    const locs: DevLocation[] = [
+      { id: 'spawn', label: 'Crash site (spawn)', group: 'Surface', scene: 'surface', x: 0, z: 0, face: 0 },
+      { id: 'base', label: 'Base site', group: 'Surface', scene: 'surface', x: BASE_CENTER.x - 4, z: BASE_CENTER.z - 14, face: 0 },
+    ]
+    for (const st of STRUCTURES) {
+      locs.push({ id: `structure-${st.name}`, label: st.name, group: 'Structures', scene: 'surface', x: st.x, z: st.z - st.radius - 8, face: 0 })
+    }
+    for (const r of REGIONS) {
+      locs.push({ id: `region-${r.id}`, label: r.name, group: 'Regions', scene: 'surface', x: r.x + 18, z: r.z + 18, face: Math.PI })
+    }
+    for (const a of ANOMALIES) {
+      locs.push({ id: `anomaly-${a.id}`, label: `Anomaly: ${a.id}`, group: 'Act II', scene: 'surface', x: a.x, z: a.z - 9, face: 0 })
+    }
+    const drifter = this.creatures.find((c) => !c.scanned) ?? this.creatures[0]
+    if (drifter) locs.push({ id: 'drifter', label: 'Nearest unscanned drifter', group: 'Act II', scene: 'surface', x: drifter.x, z: drifter.z - 8, face: 0 })
+    locs.push({ id: 'cave-spawn', label: 'Cave entrance', group: 'Cave', scene: 'cave', x: CAVE_SPAWN.x, z: CAVE_SPAWN.z, face: Math.PI })
+    locs.push({ id: 'cave-ladder', label: 'Cave ladder', group: 'Cave', scene: 'cave', x: LADDER.x - 6, z: LADDER.z, face: Math.PI / 2 })
+    locs.push({ id: 'cave-cavern', label: 'Hidden cavern', group: 'Cave', scene: 'cave', x: CAVERN.x - 12, z: CAVERN.z, face: Math.PI / 2 })
+    const ore = this.caveWorld.pickups.find((p) => !p.collected)
+    if (ore) locs.push({ id: 'cave-ore', label: 'Nearest glowing ore', group: 'Cave', scene: 'cave', x: ore.x - 3, z: ore.z, face: Math.PI / 2 })
+    return locs
+  }
+
+  devTeleport(id: string): void {
+    const loc = this.devLocations().find((l) => l.id === id)
+    if (!loc) return
+    this.cutscene.skip()
+    this.scene = loc.scene
+    if (loc.scene === 'cave') this.tracker.currentRegion = 'UNDERGROUND'
+    this.placePlayer(loc.x, loc.z, loc.face)
+    this.projectiles = []
+    this.fade = 0.6
+  }
+
+  devCompleteQuest(): string | null {
+    this.cutscene.skip()
+    return this.tracker.devCompleteActive((part) => this.devAddPart(part))
+  }
+
+  devJumpToAct(act: number): void {
+    this.cutscene.skip()
+    this.tracker.devJumpToAct(act, (part) => this.devAddPart(part))
+  }
+
+  devGiveResources(): void {
+    this.tracker.devGive({ 'moon-rock': 30, 'metal-scrap': 30, 'power-cell': 3, 'anomaly-shard': 10, 'bio-sample': 5, 'rare-ore': 15 })
+  }
+
+  devGiveGear(): void {
+    const missing = (['basic-tools', 'power-drill', 'armor-plating', 'blaster'] as ItemId[]).filter((i) => !this.tracker.hasItem(i))
+    this.tracker.devGive(Object.fromEntries(missing.map((i) => [i, 1])))
+  }
+
+  devHeal(): void {
+    this.hp = PLAYER_MAX_HP
+    this.deadTimer = 0
+  }
+
+  devToggleGod(): boolean {
+    this.devGod = !this.devGod
+    return this.devGod
+  }
+
+  devSpawnSuits(count = 3): string {
+    if (!this.onSurface) return 'surface only, teleport up first'
+    const P = this.player
+    for (let i = 0; i < count; i++) {
+      const a = P.heading + (i - (count - 1) / 2) * 0.5
+      this.enemies.push(spawnEnemy(P.x + Math.sin(a) * 35, P.z + Math.cos(a) * 35))
+    }
+    return `${count} suits ahead of you`
+  }
+
+  devStartWave(): string {
+    this.startWave()
+    return this.onSurface ? 'suits marching on the base' : 'started on the surface (you are underground)'
+  }
+
+  devClearEnemies(): void {
+    this.enemies = []
+    this.projectiles = []
+    this.wave.active = false
+    this.wave.restartTimer = 0
+  }
+
+  devKillPlayer(): void {
+    this.devGod = false
+    this.damagePlayer(9999)
+  }
+
+  devSetSpeed(mult: number): void {
+    this.player.speedMult = mult
+  }
+
+  devToggleMinimap(): boolean {
+    this.showMinimap = !this.showMinimap
+    return this.showMinimap
+  }
+
+  devRevealAll(): void {
+    this.tracker.devRevealAll()
+  }
+
+  devSkipCutscene(): void {
+    this.cutscene.skip()
+  }
+
+  devStatus(): DevStatus {
+    const P = this.player
+    return {
+      fps: Math.round(this.fps),
+      scene: this.scene,
+      x: Math.round(P.x),
+      z: Math.round(P.z),
+      y: +P.y.toFixed(1),
+      heading: Math.round((((P.heading * 180) / Math.PI) % 360 + 360) % 360),
+      region: this.tracker.currentRegion,
+      quest: this.tracker.activeQuest?.title ?? 'none',
+      act: this.tracker.act,
+      hp: Math.round(this.hp),
+      enemies: this.enemies.length,
+      god: this.devGod,
+      speed: P.speedMult,
+      minimap: this.showMinimap,
+    }
+  }
+
+  private devAddPart(part: BasePart): void {
+    const structure = PART_STRUCTURES[part]
+    if (structure && !this.surface.structures.includes(structure)) this.surface.structures.push(structure)
+  }
+
   stateForAI(): GameStateForAI {
     const { player, world, tracker } = this
     const needed = new Set<ItemId>()
@@ -333,7 +496,9 @@ export class Game {
   }
 
   private frame = (now: number) => {
-    const dt = Math.min(0.05, (now - this.last) / 1000)
+    const raw = (now - this.last) / 1000
+    if (raw > 0) this.fps += (1 / raw - this.fps) * 0.05
+    const dt = Math.min(0.05, raw)
     this.last = now
     this.time += dt
     this.update(dt)
@@ -406,7 +571,10 @@ export class Game {
     updateCreatures(this.creatures, dt, player.x, player.z, this.world)
     tracker.enterRegion(regionAt(player.x, player.z))
     if (tracker.signalRevealed && !tracker.signalFound && this.distanceTo(HATCH.x, HATCH.z) < HATCH_RANGE) tracker.findSignal()
-    if (tracker.baseParts.has('housing') && this.survivors.length === 0) this.survivors = createSurvivors()
+    if (tracker.baseParts.has('housing') && this.survivors.length === 0) {
+      this.survivors = createSurvivors()
+      for (const s of this.survivors) s.job = tracker.jobs[s.name] ?? null
+    }
     updateSurvivors(this.survivors, dt, this.time)
   }
 
@@ -522,6 +690,7 @@ export class Game {
   }
 
   private damagePlayer(amount: number): void {
+    if (this.devGod) return
     const dmg = this.tracker.hasItem('armor-plating') ? amount * (1 - ARMOR_REDUCTION) : amount
     this.hp -= dmg
     this.hurtFlash = 0.3
@@ -1022,6 +1191,7 @@ export class Game {
       showPitWarning: !!crater?.isPit && player.grounded && player.y < -1 && !this.tablet.open,
       prompt: this.deadTimer > 0 ? null : this.interaction,
       muted: this.audio.muted,
+      showMinimap: this.showMinimap,
       combat: {
         hp: this.hp,
         maxHp: PLAYER_MAX_HP,
